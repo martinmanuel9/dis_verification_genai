@@ -287,7 +287,7 @@ class RAGService:
     def get_llm_service(self, model_name: str):
         """Get LLM service for the specified model"""
         model_name = model_name.lower()
-        if model_name in ["gpt4", "gpt-4", "gpt-3.5", "gpt-3.5-turbo"]:
+        if model_name in ["gpt-4", "gpt-3.5", "gpt-3.5-turbo"]:
             return get_llm(model_name=model_name)
         elif model_name in ["llama", "llama3"]:
             return get_llm(model_name=model_name)
@@ -300,7 +300,7 @@ class RAGService:
         start_time = time.time()
         
         try:
-            print(f"🤖 Processing with agent: {agent['name']} using model: {agent['model_name']}")
+            print(f"Processing with agent: {agent['name']} using model: {agent['model_name']}")
             
             # Try to get relevant documents via API
             relevant_docs, docs_found = self.get_relevant_documents(query_text, collection_name)
@@ -309,7 +309,7 @@ class RAGService:
             llm = self.get_llm_service(agent["model_name"])
             
             if docs_found and relevant_docs:
-                print(f"✅ Using RAG mode with {len(relevant_docs)} documents")
+                print(f"Using RAG mode with {len(relevant_docs)} documents")
                 
                 # Create context from retrieved documents
                 context = "\n\n---DOCUMENT SEPARATOR---\n\n".join(relevant_docs)

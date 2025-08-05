@@ -23,6 +23,12 @@ from zipfile import ZipFile
 from bs4 import BeautifulSoup
 import redis
 
+from urllib.parse import urlparse
+import requests
+from langchain.docstore.document import Document
+from sentence_transformers import SentenceTransformer
+from PIL import Image
+
 
 load_dotenv()
 # Set up logging
@@ -966,127 +972,6 @@ def process_document_with_context_multi_model(file_content: bytes,
         "file_type": file_extension
     }
     
-# def process_document_with_context(file_content: bytes, filename: str, temp_dir: str, doc_id: str, openai_api_key: str = None) -> Dict:
-#     """Process document maintaining context and storing images and their descriptions using MarkItDown"""
-
-#     file_extension = Path(filename).suffix.lower()
-#     images_data = []
-
-#     # --- Step 1: Extract images from file ---
-#     if file_extension == '.pdf':
-#         pages_data = extract_and_store_images_from_file(file_content, filename, temp_dir, doc_id)
-
-#         # --- Step 2: Generate descriptions with MarkItDown ---
-#         pages_data = describe_images_for_pages(pages_data, openai_api_key)
-
-#         # --- Step 3: Flatten all image data ---
-#         for page in pages_data:
-#             for img_path, desc in zip(page["images"], page.get("image_descriptions", [])):
-#                 images_data.append({
-#                     "filename": Path(img_path).name,
-#                     "storage_path": img_path,
-#                     "description": desc,
-#                     "position_marker": f"[IMAGE:{Path(img_path).name}]",
-#                     "page": page["page"]
-#                 })
-
-#     # --- Step 4: Save the original file ---
-#     temp_file_path = os.path.join(temp_dir, filename)
-#     with open(temp_file_path, 'wb') as f:
-#         f.write(file_content)
-
-#     # --- Step 5: Run MarkItDown on entire document ---
-#     try:
-#         md_instance = get_markitdown_instance(openai_api_key)
-#         result = md_instance.convert(temp_file_path)
-#         content = result.text_content if hasattr(result, 'text_content') else str(result)
-#         logger.info(f"MarkItDown extracted content length: {len(content)} characters")
-#     except Exception as e:
-#         logger.error(f"MarkItDown processing failed for {filename}: {e}")
-#         if file_extension == '.txt':
-#             content = file_content.decode('utf-8', errors='ignore')
-#         else:
-#             # If MarkItDown fails, create basic content structure
-#             content = f"Document: {filename}\n\nContent could not be extracted via MarkItDown."
-
-#     # --- Step 6: Enhanced image integration strategy ---
-#     if images_data:
-#         logger.info(f"Integrating {len(images_data)} images into document content")
-        
-#         # Strategy 1: If content is very short or empty, create a structured document
-#         if len(content.strip()) < 50:
-#             logger.info("Content is minimal, creating structured document with images")
-#             enhanced_content = [f"Document: {filename}\n"]
-            
-#             # Group images by page
-#             pages_with_images = {}
-#             for img_data in images_data:
-#                 page_num = img_data.get("page", 1)
-#                 if page_num not in pages_with_images:
-#                     pages_with_images[page_num] = []
-#                 pages_with_images[page_num].append(img_data)
-            
-#             # Add each page with its images
-#             for page_num in sorted(pages_with_images.keys()):
-#                 enhanced_content.append(f"\n--- Page {page_num} ---\n")
-#                 for img_data in pages_with_images[page_num]:
-#                     enhanced_content.append(f"{img_data['position_marker']}")
-#                     enhanced_content.append(f"Image Description: {img_data['description']}\n")
-            
-#             content = "\n".join(enhanced_content)
-        
-#         else:
-#             # Strategy 2: Insert images into existing content
-#             logger.info("Inserting images into existing content")
-            
-#             # Split content into sections (paragraphs or lines)
-#             if '\n\n' in content:
-#                 sections = content.split('\n\n')
-#                 separator = '\n\n'
-#             else:
-#                 sections = content.split('\n')
-#                 separator = '\n'
-            
-#             enhanced_sections = []
-#             images_inserted = 0
-            
-#             # Insert images at strategic points
-#             for i, section in enumerate(sections):
-#                 enhanced_sections.append(section)
-                
-#                 # Insert an image every few sections if we have images left
-#                 if (images_inserted < len(images_data) and 
-#                     i > 0 and 
-#                     (i % max(1, len(sections) // len(images_data)) == 0)):
-                    
-#                     img_data = images_data[images_inserted]
-#                     image_section = f"\n{img_data['position_marker']}\nImage Description: {img_data['description']}\n"
-#                     enhanced_sections.append(image_section)
-#                     images_inserted += 1
-#                     logger.info(f"Inserted image {images_inserted}: {img_data['filename']}")
-            
-#             # Add any remaining images at the end
-#             while images_inserted < len(images_data):
-#                 img_data = images_data[images_inserted]
-#                 image_section = f"\n{img_data['position_marker']}\nImage Description: {img_data['description']}\n"
-#                 enhanced_sections.append(image_section)
-#                 images_inserted += 1
-#                 logger.info(f"Added remaining image {images_inserted}: {img_data['filename']}")
-            
-#             content = separator.join(enhanced_sections)
-        
-#         logger.info(f"Final content length after image integration: {len(content)} characters")
-        
-#         # Log a sample of the final content for debugging
-#         sample_content = content[:500] + "..." if len(content) > 500 else content
-#         logger.info(f"Sample final content: {sample_content}")
-
-#     return {
-#         "content": content,
-#         "images_data": images_data,
-#         "file_type": file_extension
-#     }
-
 
 def run_ingest_job(
     job_id: str,
@@ -1827,6 +1712,111 @@ def get_job_status(job_id: str):
         "status": status,
         "total_chunks":     int(prog.get("total_chunks",     0)),
         "processed_chunks": int(prog.get("processed_chunks", 0)),
+    }
+    
+## html scraping 
+class BaseScraper:
+    def __init__(self, url: str):
+        self.url = url
+        self.soup = None
+
+    def fetch(self):
+        resp = requests.get(self.url, timeout=10)
+        resp.raise_for_status()
+        self.soup = BeautifulSoup(resp.text, "html.parser")
+
+    def extract(self):
+        # title
+        title = (
+            self.soup.find("meta", property="og:title") or
+            self.soup.find("title")
+        )
+        title = title["content"] if title and title.get("content") else title.get_text(strip=True)
+
+        # description (Readability could be swapped in here)
+        desc_tag = self.soup.find("meta", property="og:description") or self.soup.find("meta", attrs={"name":"description"})
+        description = desc_tag["content"].strip() if desc_tag else self.soup.get_text("\n", strip=True)
+
+        # images: try og:image then all <img> in body
+        images = []
+        og = self.soup.find("meta", property="og:image")
+        if og and og.get("content"):
+            images.append(og["content"])
+        else:
+            for img in self.soup.select("img"):
+                if src := img.get("src"):
+                    images.append(requests.compat.urljoin(self.url, src))
+
+        return {
+            "title":       title,
+            "description": description,
+            "images":      list(dict.fromkeys(images)),
+            "source_url":  self.url
+        }
+
+def download_images(urls: list[str], dest_folder: str = "downloaded_images") -> list[str]:
+    os.makedirs(dest_folder, exist_ok=True)
+    local_paths = []
+    for u in urls:
+        fn = os.path.basename(u.split("?",1)[0])
+        out = os.path.join(dest_folder, fn)
+        r = requests.get(u, stream=True); r.raise_for_status()
+        with open(out, "wb") as f:
+            for chunk in r.iter_content(8192):
+                f.write(chunk)
+        local_paths.append(out)
+    return local_paths
+
+
+class URLIngestRequest(BaseModel):
+    url: str
+    collection_name: str
+
+@app.post("/ingest-url")
+async def ingest_url(req: URLIngestRequest):
+    # 1) Scrape the page HTML
+    scraper = BaseScraper(req.url)
+    scraper.fetch()
+    html_content = scraper.soup.prettify().encode('utf-8')
+
+    # 2) Prepare a temporary file payload
+    filename = "page.html"
+    payloads = [{"filename": filename, "content": html_content}]
+
+    # 3) Ensure target collection exists
+    if req.collection_name not in chroma_client.list_collections():
+        chroma_client.create_collection(req.collection_name)
+
+    # 4) Generate a job_id and synchronously run ingest job
+    job_id = uuid.uuid4().hex
+    # Using default chunk settings; adjust as needed or pull from config
+    chunk_size = 1000
+    chunk_overlap = 200
+    store_images = True
+    model_name = "html"
+    selected_models = set([m for m in ['openai','ollama','huggingface','enhanced_local'] if VISION_CONFIG.get(f"{m}_enabled", False)])
+    openai_api_key = os.getenv('OPEN_AI_API_KEY')
+
+    try:
+        # Direct call to your existing ingestion pipeline
+        run_ingest_job(
+            job_id=job_id,
+            payloads=payloads,
+            collection_name=req.collection_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            store_images=store_images,
+            model_name=model_name,
+            vision_models=list(selected_models),
+            openai_api_key=openai_api_key,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ingest job failed: {e}")
+
+    return {
+        'status': 'ingested',
+        'job_id': job_id,
+        'collection': req.collection_name
     }
 
 ### Run with Uvicorn if called directly ###

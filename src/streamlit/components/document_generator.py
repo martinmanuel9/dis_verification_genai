@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+from components.upload_documents import *
 from utils import *
 
 

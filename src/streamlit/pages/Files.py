@@ -12,7 +12,7 @@ import re
 
 torch.classes.__path__ = [] 
 
-# This will resolve to the service discovery DNS name in AWS
+# This will resolve to the service discovery 
 CHROMADB_API = os.getenv("CHROMA_URL", "http://localhost:8020")
 
 
@@ -191,3 +191,4 @@ with st.expander("Browse Documents in Collection"):
 # ---- RECONSTRUCT DOCUMENTS ----
 with st.expander("View Image Processed"):
     view_images(key_prefix="files_reconstruct")
+    

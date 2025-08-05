@@ -246,7 +246,14 @@ def render_upload_component(
             accept_multiple_files=True,
             key=pref("files")
         )
-        
+
+        st.subheader("Ingest Web URL")
+        url = st.text_input(
+            "Enter product page URL (optional):",
+            placeholder="https://example.com/product/1234",
+            key="ingest_url"
+        )
+
         # Vision model selection
         st.subheader("Vision Models")
         openai_v = st.checkbox("OpenAI Vision", value=False, key=pref("openai_vision"))
@@ -269,57 +276,89 @@ def render_upload_component(
         if st.button("Upload and Process", key=pref("upload_button")):
             if not target_collection:
                 st.error("Please select or create a collection first.")
-            elif not uploaded:
-                st.error("Please choose at least one file.")
+            elif not uploaded and not url:
+                st.error("Please choose at least one file or enter a URL.")
             else:
                 # prepare payload
-                files = [("files", (f.name, f.getvalue(), f.type)) for f in uploaded]
-                params = {
-                    "collection_name": target_collection,
-                    "chunk_size": chunk_size,
-                    "chunk_overlap": chunk_overlap,
-                    "store_images": True,
-                    "model_name": "enhanced",
-                    "vision_models": ",".join(vision_models)
-                }
+                if uploaded:
+                    files = [("files", (f.name, f.getvalue(), f.type)) for f in uploaded]
+                    params = {
+                        "collection_name": target_collection,
+                        "chunk_size": chunk_size,
+                        "chunk_overlap": chunk_overlap,
+                        "store_images": True,
+                        "model_name": "enhanced",
+                        "vision_models": ",".join(vision_models)
+                    }
 
-                with st.spinner("Starting upload…"):
                     try:
-                        resp = requests.post(upload_endpoint, files=files, params=params, timeout=10)
-                        resp.raise_for_status()
-                        job_id = resp.json().get("job_id")
+                        with st.spinner("Uploading and processing files…"):
+                            resp = requests.post(upload_endpoint, files=files, params=params, timeout=300)
+                            resp.raise_for_status()
+                            job_id = resp.json().get("job_id")
+                        progress = st.progress(0)
+                        status_text = st.empty()
+                        while True:
+                            time.sleep(1)
+                            status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
+                            total = status.get("total_chunks", 0)
+                            done = status.get("processed_chunks", 0)
+                            pct = int(done/total*100) if total else 0
+                            progress.progress(min(pct, 100))
+                            status_text.text(f"{done}/{total} chunks processed")
+                            if status.get("status") in ("success","failed"): break
+                        if status.get("status") == "success":
+                            st.success("File ingestion complete!")
+                            st.json(status)
+                            st.session_state['collections'] = utils.get_chromadb_collections()
+                        else:
+                            st.error("File ingestion failed.")
                     except Exception as e:
                         st.error(f"Upload failed: {e}")
-                        return
         
-                # Poll job status
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                total, processed = 0, 0
-                while True:
-                    time.sleep(1)
-                    status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
-                    total = status.get("total_chunks", 0)
-                    processed = status.get("processed_chunks", 0)
-                    if total:
-                        pct = int(processed / total * 100)
-                    else:
-                        pct = 0
-                    progress_bar.progress(min(pct, 100))
-                    status_text.text(f"{processed}/{total} chunks processed")
+                    # Poll job status
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    total, processed = 0, 0
+                    while True:
+                        time.sleep(1)
+                        status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
+                        total = status.get("total_chunks", 0)
+                        processed = status.get("processed_chunks", 0)
+                        if total:
+                            pct = int(processed / total * 100)
+                        else:
+                            pct = 0
+                        progress_bar.progress(min(pct, 100))
+                        status_text.text(f"{processed}/{total} chunks processed")
 
-                    if status.get("status") in ("success", "failed"):
-                        break
+                        if status.get("status") in ("success", "failed"):
+                            break
 
-                if status.get("status") == "success":
-                    latest = status.get("latest_document_id")
-                    if latest:
-                        st.session_state.latest_doc_id = latest
-                    st.success("Ingestion complete!")
-                    st.session_state['latest_doc_id'] = status.get("latest_document_id", "")
-                    collections = utils.get_chromadb_collections()
-                    st.session_state['collections'] = collections
-                
-                else:
-                    st.error("Ingestion failed.")
+                    if status.get("status") == "success":
+                        latest = status.get("latest_document_id")
+                        if latest:
+                            st.session_state.latest_doc_id = latest
+                        st.success("Ingestion complete!")
+                        st.session_state['latest_doc_id'] = status.get("latest_document_id", "")
+                        collections = utils.get_chromadb_collections()
+                        st.session_state['collections'] = collections
                     
+                    else:
+                        st.error("Ingestion failed.")
+            if url:
+                payload = {"url": url, "collection_name": target_collection}
+                try:
+                    with st.spinner("Ingesting web page…"):
+                        resp = requests.post(f"{CHROMADB_API}/ingest-url", json=payload)
+                        resp.raise_for_status()
+                    data = resp.json()
+                    st.success(f"Ingested URL: {data.get('url')} into collection {target_collection}")
+                    st.json(data)
+                    st.session_state['collections'] = utils.get_chromadb_collections()
+                except Exception as e:
+                    st.error(f"URL ingestion failed: {e}")
+            # 3) If neither provided
+            if not uploaded and not url:
+                st.warning("Please upload at least one file or provide a URL to ingest.")
+                        

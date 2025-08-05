@@ -63,7 +63,7 @@ def Direct_Chat():
                 payload = {
                     "query": user_input,
                     "model": model_key_map[mode],
-                    "use_rag": use_rag,
+                    "use_rag": True if use_rag else False,
                     "collection_name": collection_name
                 }
                 with st.spinner(f"{mode} is analyzing..."):

@@ -1778,9 +1778,10 @@ async def ingest_url(req: URLIngestRequest):
     scraper = BaseScraper(req.url)
     scraper.fetch()
     html_content = scraper.soup.prettify().encode('utf-8')
-
+    uid = uuid.uuid4().hex
+    
     # 2) Prepare a temporary file payload
-    filename = "page.html"
+    filename = f"page_{uid}.html"
     payloads = [{"filename": filename, "content": html_content}]
 
     # 3) Ensure target collection exists

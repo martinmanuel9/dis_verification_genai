@@ -18,7 +18,6 @@ EVALUATE_ENDPOINT = f"{FASTAPI_API}/evaluate_doc"
 def fetch_collections():
     return get_chromadb_collections()
 
-
 def Direct_Chat():
     # Load collections once per session
     if "collections" not in st.session_state:

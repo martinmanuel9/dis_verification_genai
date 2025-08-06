@@ -26,6 +26,8 @@ from schemas.database_schema import (
 )
 from langchain_core.messages import HumanMessage
 from starlette.concurrency import run_in_threadpool
+
+
 import logging
 logger = logging.getLogger("FASTAPI_ROUTER")
 
@@ -55,14 +57,33 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         session_id = str(uuid.uuid4())
         
         if request.use_rag and request.collection_name:
-            # RAG mode
-            answer, response_time = llm_service.query_model(
-                model_name=request.model,
-                query=request.query,
+            # --- RAG mode: fetch docs via your RAGService, then run a retrieval chain
+            start = time.time()
+            answer, response_time = rag_service.process_query_with_rag(
+                query_text=request.query,
                 collection_name=request.collection_name,
-                query_type="chat",
-                session_id=session_id
+                model_name=request.model,
             )
+            
+            print(f"RAG response in router: {answer} (took {response_time} ms)")
+            
+            # Save chat history
+            try:
+                history = ChatHistory(
+                    user_query=request.query,
+                    response=answer,
+                    model_used=request.model,
+                    query_type="rag",
+                    response_time_ms=response_time,
+                    langchain_used=True,
+                    session_id=session_id
+                )
+                db.add(history)
+                db.commit()
+            except Exception as e:
+                print(f"Failed to save chat history: {e}")
+                db.rollback()
+            
             return {
                 "response": answer,
                 "response_time_ms": response_time,

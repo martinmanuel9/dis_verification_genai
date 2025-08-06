@@ -13,6 +13,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain.schema import Document
+from langchain.vectorstores.base import VectorStoreRetriever
+from langchain.chains.question_answering import load_qa_chain
 
 from services.database import (
     SessionLocal, 
@@ -29,16 +32,79 @@ from services.database import (
 class RAGService:
     def __init__(self):
         self.chromadb_api_url = os.getenv("CHROMA_URL", "http://localhost:8020")
-        self.embedding_function = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+        self.embedding_function = HuggingFaceEmbeddings(model_name="sentence-transformers/multi-qa-mpnet-base-dot-v1")
         self.n_results = int(os.getenv("N_RESULTS", "5"))
         self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
         self.compliance_agents = []
         
-        print(f"    RAG Service API Config:")
-        print(f"    ChromaDB API URL: {self.chromadb_api_url}")
-        
         # Test connection
         self.test_connection()
+        
+    def run_rag_chain(
+        self,
+        query: str,
+        collection_name: str,
+        model_name: str
+    ) -> Tuple[str, int]:
+        """
+        1) Pulls the top-k docs from ChromaDB via your API
+        2) Stuffs them into a LangChain QA chain
+        3) Returns (answer, response_time_ms)
+        """
+        # 1) fetch docs
+        docs, found = self.get_relevant_documents(
+            query=query,
+            collection_name=collection_name
+        )
+        if not found:
+            return "No relevant documents found.", 0
+
+        # 2) wrap for LangChain
+        lc_docs = [Document(page_content=d) for d in docs]
+
+        # 3) build a simple “stuff” QA chain
+        llm = get_llm(model_name=model_name)
+        chain = load_qa_chain(llm, chain_type="stuff")
+
+        start = time.time()
+        answer = chain.run(input_documents=lc_docs, question=query)
+        rt_ms = int((time.time() - start) * 1000)
+
+        return answer, rt_ms
+        
+    def process_query_with_rag(
+        self,
+        query_text: str,
+        collection_name: str,
+        model_name: str
+    ) -> Dict[str, Any]:
+        """
+        Simple RAG entrypoint that:
+            1) Retrieves top-k docs
+            2) Runs a 'stuff'-style QA chain
+            3) Returns a dict { 'response': str, 'response_time_ms': int }
+        """
+
+        answer, rt_ms = self.run_rag_chain(
+            query=query_text,
+            collection_name=collection_name,
+            model_name=model_name,
+        )
+        print(f"RAG response in rag_service: {answer} (took {rt_ms} ms)")
+
+        return answer, rt_ms
+        
+        
+    def docs_to_retriever(self, docs: List[str]) -> VectorStoreRetriever:
+            # Wrap your strings in LangChain Documents
+            lc_docs = [Document(page_content=d) for d in docs]
+            # Use an in-memory retriever
+            from langchain.memory import InMemoryVectorStore
+            vector_store = InMemoryVectorStore.from_documents(
+                lc_docs,
+                embedding=self.embedding_function
+            )
+            return vector_store.as_retriever(search_kwargs={"k": len(docs)})
         
     def test_connection(self):
         """Test connection to ChromaDB API"""
@@ -102,7 +168,7 @@ class RAGService:
                         print(f"        Preview: {doc[:150]}...")
                     
                     # Test different queries
-                    test_queries = ["document", "legal", "court", "rule", "motion", "case"]
+                    test_queries = ["document"]
                     
                     print(f"\nTesting queries on '{collection_name}':")
                     for query in test_queries:

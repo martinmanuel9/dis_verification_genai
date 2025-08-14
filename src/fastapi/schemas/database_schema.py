@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime
 
 class CreateAgentRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="Agent name")
@@ -100,3 +100,93 @@ class EvaluateResponse(BaseModel):
     response:        str
     response_time_ms:int
     session_id:      str
+
+# RAG Assessment Service Schemas
+class RAGAssessmentRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Query for RAG assessment")
+    collection_name: str = Field(..., description="ChromaDB collection name")
+    model_name: str = Field(default="gpt-3.5-turbo", description="Model to use for generation")
+    top_k: int = Field(default=5, ge=1, le=20, description="Number of documents to retrieve")
+    include_quality_assessment: bool = Field(default=True, description="Include quality assessment")
+    include_alignment_assessment: bool = Field(default=True, description="Include alignment assessment")
+    include_classification_metrics: bool = Field(default=True, description="Include classification metrics")
+
+class RAGPerformanceMetricsResponse(BaseModel):
+    session_id: str
+    query: str
+    collection_name: str
+    retrieval_time_ms: float
+    generation_time_ms: float
+    total_time_ms: float
+    documents_retrieved: int
+    documents_used: int
+    relevance_score: float
+    context_length: int
+    response_length: int
+    model_name: str
+    success: bool
+    error_message: Optional[str] = None
+    timestamp: datetime
+
+class RAGQualityAssessmentResponse(BaseModel):
+    session_id: str
+    relevance_score: float
+    coherence_score: float
+    factual_accuracy: float
+    completeness_score: float
+    context_utilization: float
+    overall_quality: float
+    assessment_method: str
+    assessor_model: Optional[str] = None
+    timestamp: datetime
+
+class RAGAlignmentAssessmentResponse(BaseModel):
+    session_id: str
+    intent_alignment_score: float
+    query_coverage_score: float
+    instruction_adherence_score: float
+    answer_type_classification: str
+    expected_answer_type: str
+    answer_type_match: bool
+    tone_consistency_score: float
+    scope_accuracy_score: float
+    missing_elements: List[str]
+    extra_elements: List[str]
+    assessment_confidence: float
+    timestamp: datetime
+
+class RAGClassificationMetricsResponse(BaseModel):
+    session_id: str
+    query_classification: str
+    response_classification: str
+    classification_confidence: float
+    domain_relevance: str
+    complexity_level: str
+    information_density: float
+    actionability_score: float
+    specificity_score: float
+    citation_quality: float
+    timestamp: datetime
+
+class RAGAssessmentResponse(BaseModel):
+    response: str
+    performance_metrics: RAGPerformanceMetricsResponse
+    quality_assessment: Optional[RAGQualityAssessmentResponse] = None
+    alignment_assessment: Optional[RAGAlignmentAssessmentResponse] = None
+    classification_metrics: Optional[RAGClassificationMetricsResponse] = None
+
+class RAGAnalyticsRequest(BaseModel):
+    time_period_hours: int = Field(default=24, ge=1, le=8760, description="Analysis period in hours")
+    collection_name: Optional[str] = Field(None, description="Filter by collection name")
+
+class RAGBenchmarkRequest(BaseModel):
+    query_set: List[str] = Field(..., min_items=1, description="Set of test queries")
+    collection_name: str = Field(..., description="Collection to test against")
+    configurations: List[Dict[str, Any]] = Field(..., min_items=1, description="List of configurations to test")
+
+class CollectionPerformanceRequest(BaseModel):
+    collection_name: str = Field(..., description="Collection name to analyze")
+
+class RAGMetricsExportRequest(BaseModel):
+    format: str = Field(default="json", description="Export format")
+    time_period_hours: int = Field(default=24, ge=1, le=8760, description="Export period in hours")

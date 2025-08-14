@@ -31,16 +31,18 @@ class AgentService:
         try:
             from services.llm_service import LLMService
             self.llm_service = LLMService()
+            print("Using LLMService (same as Direct Chat)")
             
             # Test that it works
             test_llm = self.llm_service.get_llm_service("gpt-4")
+            print("LLMService connection verified")
             
         except Exception as e:
             print(f"LLMService failed, falling back to llm_utils: {e}")
             self.llm_service = None
         
         if not self.llm_service:
-            self.llms = self._initialize_llms_unified()
+            self.llms = {}
         
         try:
             self.compliance_parser = PydanticOutputParser(pydantic_object=ComplianceResultSchema)
@@ -48,25 +50,6 @@ class AgentService:
         except Exception as e:
             print(f"Failed to initialize compliance parser: {e}")
 
-    def _initialize_llms(self) -> Dict[str, Any]:
-        """Use the EXACT same LLM path as Direct Chat"""
-        llms = {}
-        
-        try:
-            from services.llm_utils import get_llm
-            
-            for model_name in ["gpt-4", "llama3"]:
-                try:
-                    llm = get_llm(model_name)  # Same method as Direct Chat
-                    llms[model_name] = llm
-                    print(f"{model_name} initialized via llm_utils (Direct Chat method)")
-                except Exception as e:
-                    print(f"Failed to initialize {model_name}: {e}")
-        
-        except Exception as e:
-            print(f"Error with llm_utils: {e}")
-        
-        return llms
     
     def get_llm_for_agent(self, model_name: str):
         """Get LLM using the same method as Direct Chat"""
@@ -239,14 +222,6 @@ class AgentService:
                 "method": "error"
             }
 
-    def _parse_compliance_response(self, raw_text: str) -> Tuple[Optional[bool], str]:
-        lines = raw_text.split("\n", 1)
-        first_line = lines[0].lower()
-        if "yes" in first_line:
-            return True, lines[1].strip() if len(lines) > 1 else ""
-        elif "no" in first_line:
-            return False, lines[1].strip() if len(lines) > 1 else ""
-        return None, raw_text
 
     def run_debate(self, session_id: str, data_sample: str, db: Session) -> Dict[str, str]:
         """Run debate sequence - WORKS with unified LLM path"""

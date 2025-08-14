@@ -7,15 +7,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from langchain_core.messages import HumanMessage
-from chromadb import Client
-from chromadb.config import Settings
+from langchain.schema import Document
+from langchain.chains.question_answering import load_qa_chain
 from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain.schema import Document
-from langchain.vectorstores.base import VectorStoreRetriever
-from langchain.chains.question_answering import load_qa_chain
 
 from services.database import (
     SessionLocal, 
@@ -39,7 +34,7 @@ class RAGService:
         
         # Test connection
         self.test_connection()
-        
+    
     def run_rag_chain(
         self,
         query: str,
@@ -72,6 +67,7 @@ class RAGService:
 
         return answer, rt_ms
         
+        
     def process_query_with_rag(
         self,
         query_text: str,
@@ -95,16 +91,6 @@ class RAGService:
         return answer, rt_ms
         
         
-    def docs_to_retriever(self, docs: List[str]) -> VectorStoreRetriever:
-            # Wrap your strings in LangChain Documents
-            lc_docs = [Document(page_content=d) for d in docs]
-            # Use an in-memory retriever
-            from langchain.memory import InMemoryVectorStore
-            vector_store = InMemoryVectorStore.from_documents(
-                lc_docs,
-                embedding=self.embedding_function
-            )
-            return vector_store.as_retriever(search_kwargs={"k": len(docs)})
         
     def test_connection(self):
         """Test connection to ChromaDB API"""
@@ -133,62 +119,6 @@ class RAGService:
             print(f"Error listing collections via API: {e}")
             return []
 
-        
-    def verify_uploaded_documents(self):
-        """Verify RAG service can see documents uploaded via Streamlit"""
-        print("VERIFYING RAG SERVICE CAN ACCESS UPLOADED DOCUMENTS")
-        print("=" * 60)
-        
-        try:
-            collections = self.list_available_collections()
-            
-            if not collections:
-                print("No collections found!")
-                return False
-            
-            found_documents = False
-            for collection_name in collections:
-                print(f"\nChecking collection: '{collection_name}'")
-                
-                collection = self.chroma_client.get_collection(collection_name)
-                doc_count = collection.count()
-                print(f"   Document count: {doc_count}")
-                
-                if doc_count > 0:
-                    found_documents = True
-                    print(f"    Found {doc_count} documents!")
-                    
-                    # Show sample documents
-                    sample = collection.peek(2)
-                    docs = sample.get('documents', [])
-                    ids = sample.get('ids', [])
-                    
-                    for i, (doc_id, doc) in enumerate(zip(ids, docs)):
-                        print(f"        Doc {i+1} ID: {doc_id}")
-                        print(f"        Preview: {doc[:150]}...")
-                    
-                    # Test different queries
-                    test_queries = ["document"]
-                    
-                    print(f"\nTesting queries on '{collection_name}':")
-                    for query in test_queries:
-                        docs, found = self.get_relevant_documents(query, collection_name)
-                        if found:
-                            print(f"Query '{query}': Found {len(docs)} documents")
-                            return True
-                        else:
-                            print(f"Query '{query}': No matches")
-            
-            if not found_documents:
-                print("No documents found in any collection")
-                
-            return found_documents
-            
-        except Exception as e:
-            print(f"Error verifying documents: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
     
     def get_relevant_documents(self, query: str, collection_name: str) -> Tuple[List[str], bool]:
         """Get relevant documents via FastAPI"""
@@ -290,64 +220,6 @@ class RAGService:
             traceback.print_exc()
             return [], False
         
-    def verify_uploaded_documents(self):
-        """Verify RAG service can see documents uploaded via Streamlit"""
-        print("VERIFYING RAG SERVICE CAN ACCESS UPLOADED DOCUMENTS (VIA API)")
-        print("=" * 70)
-        
-        # Test API connection first
-        if not self.test_connection():
-            print("Cannot connect to ChromaDB API")
-            return False
-        
-        # List collections
-        collections = self.list_available_collections()
-        
-        if not collections:
-            print("No collections found!")
-            print("Make sure you've uploaded documents via your Streamlit interface first")
-            return False
-        
-        # Test each collection
-        found_documents = False
-        for collection_name in collections:
-            print(f"\nTesting collection: '{collection_name}'")
-            
-            # Get documents in this collection
-            try:
-                response = requests.get(
-                    f"{self.chromadb_api_url}/documents", 
-                    params={"collection_name": collection_name},
-                    timeout=10
-                )
-                response.raise_for_status()
-                docs_data = response.json()
-                
-                doc_count = len(docs_data.get("documents", []))
-                print(f"   Document count: {doc_count}")
-                
-                if doc_count > 0:
-                    found_documents = True
-                    print(f"Found {doc_count} documents!")
-                    
-                    # Show sample
-                    docs = docs_data.get('documents', [])
-                    ids = docs_data.get('ids', [])
-                    
-                    for i, (doc_id, doc) in enumerate(zip(ids[:2], docs[:2])):
-                        print(f"Doc {i+1} ID: {doc_id}")
-                        print(f"Preview: {doc[:150]}...")
-                    
-                    # Test a query
-                    test_queries = ["document",  "analysis"]
-                    for query in test_queries:
-                        docs_result, found = self.get_relevant_documents(query, collection_name)
-                        if found:
-                            print(f"   ✅ Test query '{query}': Found {len(docs_result)} documents")
-                            return True
-                        
-            except Exception as e:
-                print(f"Error accessing collection: {e}")
         
 
     def get_llm_service(self, model_name: str):
@@ -355,8 +227,8 @@ class RAGService:
         model_name = model_name.lower()
         if model_name in ["gpt-4", "gpt-3.5", "gpt-3.5-turbo"]:
             return get_llm(model_name=model_name)
-        elif model_name in ["llama", "llama3"]:
-            return get_llm(model_name=model_name)
+        # elif model_name in ["llama", "llama3"]:
+        #     return get_llm(model_name=model_name)
         else:
             raise ValueError(f"Unsupported model: {model_name}")
 
@@ -667,3 +539,46 @@ INSTRUCTIONS:
         finally:
             db.close()
         return None
+
+    def query_collection_info(self, collection_name: str) -> Dict[str, Any]:
+        """Get information about a specific collection"""
+        try:
+            response = requests.get(
+                f"{self.chromadb_api_url}/documents", 
+                params={"collection_name": collection_name},
+                timeout=10
+            )
+            
+            if response.status_code == 404:
+                return {
+                    "collection_name": collection_name,
+                    "exists": False,
+                    "error": f"Collection '{collection_name}' not found"
+                }
+            
+            response.raise_for_status()
+            docs_data = response.json()
+            
+            doc_count = len(docs_data.get("documents", []))
+            documents = docs_data.get("documents", [])
+            ids = docs_data.get("ids", [])
+            
+            return {
+                "collection_name": collection_name,
+                "exists": True,
+                "document_count": doc_count,
+                "sample_documents": [
+                    {
+                        "id": doc_id,
+                        "preview": doc[:200] + "..." if len(doc) > 200 else doc
+                    }
+                    for doc_id, doc in zip(ids[:3], documents[:3])
+                ] if documents else []
+            }
+            
+        except Exception as e:
+            return {
+                "collection_name": collection_name,
+                "exists": False,
+                "error": str(e)
+            }

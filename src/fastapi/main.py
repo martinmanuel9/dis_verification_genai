@@ -1,4 +1,6 @@
 # main.py
+from dotenv import load_dotenv
+load_dotenv() 
 from fastapi import FastAPI
 from services.database import init_db
 import uvicorn

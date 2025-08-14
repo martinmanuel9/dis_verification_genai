@@ -1,6 +1,7 @@
 import uuid
 import os
-from typing import List, Dict, Optional, Tuple
+import requests
+from typing import List, Dict, Optional, Tuple, Any
 from sqlalchemy.orm import Session
 import time
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from services.agent_service import AgentService
 from services.rag_service import RAGService 
 from services.generate_docs_service import DocumentService
 from services.evaluate_doc_service import EvaluationService
+from services.rag_assessment_service import RAGAssessmentService
+from services.word_export_service import WordExportService
 from schemas.database_schema import (
     ComplianceCheckRequest,
     RAGCheckRequest,
@@ -22,10 +25,17 @@ from schemas.database_schema import (
     UpdateAgentRequest,
     UpdateAgentResponse,
     EvaluateRequest,
-    EvaluateResponse
+    EvaluateResponse,
+    RAGAssessmentRequest,
+    RAGAssessmentResponse,
+    RAGAnalyticsRequest,
+    RAGBenchmarkRequest,
+    CollectionPerformanceRequest,
+    RAGMetricsExportRequest
 )
 from langchain_core.messages import HumanMessage
 from starlette.concurrency import run_in_threadpool
+import base64
 
 
 import logging
@@ -36,6 +46,8 @@ router = APIRouter()
 llm_service = LLMService()
 rag_service = RAGService()
 agent_service = AgentService()
+rag_assessment_service = RAGAssessmentService(rag_service=rag_service, llm_service=llm_service)
+word_export_service = WordExportService()
 
 def get_db():
     db = SessionLocal()
@@ -808,6 +820,83 @@ eval_svc = EvaluationService(
     llm=llm_service
 )
 
+@router.get("/generated-documents")
+async def get_generated_documents():
+    """Get list of all generated documents from vector store"""
+    try:
+        # Query the generated_documents collection
+        chroma_url = os.getenv("CHROMA_URL", "http://localhost:8020")
+        response = requests.get(
+            f"{chroma_url}/documents",
+            params={"collection_name": "generated_documents"},
+            timeout=10
+        )
+        
+        if response.status_code == 404:
+            return {"documents": [], "message": "No generated documents found"}
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+        ids = data.get("ids", [])
+        
+        # Combine document info
+        generated_docs = []
+        for doc_id, content, metadata in zip(ids, documents, metadatas):
+            generated_docs.append({
+                "document_id": doc_id,
+                "title": metadata.get("title", "Untitled"),
+                "generated_at": metadata.get("generated_at", "Unknown"),
+                "template_collection": metadata.get("template_collection", "Unknown"),
+                "agent_ids": metadata.get("agent_ids", "[]"),
+                "session_id": metadata.get("session_id", ""),
+                "word_count": metadata.get("word_count", 0),
+                "char_count": metadata.get("char_count", 0),
+                "preview": content[:300] + "..." if len(content) > 300 else content
+            })
+        
+        # Sort by generation date (newest first)
+        generated_docs.sort(key=lambda x: x["generated_at"], reverse=True)
+        
+        return {
+            "documents": generated_docs,
+            "total_count": len(generated_docs)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/generated-documents/{document_id}")
+async def delete_generated_document(document_id: str):
+    """Delete a generated document from vector store"""
+    try:
+        chroma_url = os.getenv("CHROMA_URL", "http://localhost:8020")
+        
+        # Delete from ChromaDB
+        payload = {
+            "collection_name": "generated_documents",
+            "ids": [document_id]
+        }
+        
+        response = requests.post(
+            f"{chroma_url}/documents/delete",
+            json=payload,
+            timeout=10
+        )
+        
+        if response.ok:
+            return {"message": f"Document {document_id} deleted successfully"}
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to delete document: {response.text}"
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/evaluate_doc", response_model=EvaluateResponse)
 async def evaluate_doc(req: EvaluateRequest, db: Session = Depends(get_db)):
     try:
@@ -850,3 +939,458 @@ async def evaluate_doc(req: EvaluateRequest, db: Session = Depends(get_db)):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# =====================================================
+# RAG Assessment Service Endpoints
+# =====================================================
+
+@router.post("/rag-assessment", response_model=RAGAssessmentResponse)
+async def rag_assessment(request: RAGAssessmentRequest, db: Session = Depends(get_db)):
+    """
+    Perform comprehensive RAG assessment with performance and quality metrics.
+    """
+    try:
+        logger.info(f"RAG assessment requested for query: {request.query[:100]}...")
+        
+        response, performance_metrics, quality_assessment, alignment_assessment, classification_metrics = rag_assessment_service.assess_rag_query(
+            query=request.query,
+            collection_name=request.collection_name,
+            model_name=request.model_name,
+            top_k=request.top_k,
+            include_quality_assessment=request.include_quality_assessment,
+            include_alignment_assessment=request.include_alignment_assessment,
+            include_classification_metrics=request.include_classification_metrics
+        )
+        
+        # Convert dataclasses to response models
+        from dataclasses import asdict
+        
+        performance_response = RAGAssessmentResponse.model_validate({
+            "response": response,
+            "performance_metrics": asdict(performance_metrics),
+            "quality_assessment": asdict(quality_assessment) if quality_assessment else None,
+            "alignment_assessment": asdict(alignment_assessment) if alignment_assessment else None,
+            "classification_metrics": asdict(classification_metrics) if classification_metrics else None
+        })
+        
+        return performance_response
+        
+    except Exception as e:
+        logger.error(f"RAG assessment failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RAG assessment failed: {str(e)}")
+
+@router.post("/rag-analytics")
+async def get_rag_analytics(request: RAGAnalyticsRequest, db: Session = Depends(get_db)):
+    """
+    Get comprehensive RAG performance analytics for specified time period.
+    """
+    try:
+        analytics = rag_assessment_service.get_performance_analytics(
+            time_period_hours=request.time_period_hours,
+            collection_name=request.collection_name
+        )
+        
+        return analytics
+        
+    except Exception as e:
+        logger.error(f"RAG analytics failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RAG analytics failed: {str(e)}")
+
+@router.post("/rag-benchmark")
+async def rag_benchmark(request: RAGBenchmarkRequest, db: Session = Depends(get_db)):
+    """
+    Benchmark different RAG configurations on a set of queries.
+    """
+    try:
+        logger.info(f"RAG benchmark requested for {len(request.query_set)} queries on collection: {request.collection_name}")
+        
+        benchmark_results = rag_assessment_service.benchmark_rag_configuration(
+            query_set=request.query_set,
+            collection_name=request.collection_name,
+            configurations=request.configurations
+        )
+        
+        return benchmark_results
+        
+    except Exception as e:
+        logger.error(f"RAG benchmark failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RAG benchmark failed: {str(e)}")
+
+@router.get("/rag-collection-performance/{collection_name}")
+async def get_collection_performance(collection_name: str, db: Session = Depends(get_db)):
+    """
+    Get performance metrics specific to a collection.
+    """
+    try:
+        performance_data = rag_assessment_service.get_collection_performance(collection_name)
+        return performance_data
+        
+    except Exception as e:
+        logger.error(f"Collection performance analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Collection performance analysis failed: {str(e)}")
+
+@router.post("/rag-export-metrics")
+async def export_rag_metrics(request: RAGMetricsExportRequest, db: Session = Depends(get_db)):
+    """
+    Export RAG metrics data for external analysis.
+    """
+    try:
+        export_data = rag_assessment_service.export_metrics(
+            format=request.format,
+            time_period_hours=request.time_period_hours
+        )
+        
+        return export_data
+        
+    except Exception as e:
+        logger.error(f"RAG metrics export failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RAG metrics export failed: {str(e)}")
+
+@router.get("/rag-health")
+async def rag_assessment_health():
+    """
+    Health check for RAG Assessment Service.
+    """
+    try:
+        # Get basic stats from the assessment service
+        current_sessions = len(rag_assessment_service.performance_metrics)
+        quality_assessments = len(rag_assessment_service.quality_assessments)
+        
+        return {
+            "service": "RAG Assessment Service",
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "active_sessions": current_sessions,
+                "quality_assessments": quality_assessments
+            },
+            "endpoints": [
+                "/rag-assessment",
+                "/rag-analytics", 
+                "/rag-benchmark",
+                "/rag-collection-performance/{collection_name}",
+                "/rag-export-metrics",
+                "/rag-health"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"RAG assessment health check failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+@router.get("/rag-assessment-demo")
+async def rag_assessment_demo():
+    """
+    Demo endpoint showing example usage of RAG Assessment Service.
+    """
+    return {
+        "demo": "RAG Assessment Service",
+        "description": "Comprehensive RAG performance monitoring and quality evaluation",
+        "key_features": [
+            "Performance metrics tracking (response time, retrieval time, generation time)",
+            "Quality assessment (relevance, coherence, factual accuracy, completeness)",
+            "Analytics and benchmarking across time periods",
+            "Collection-specific performance analysis",
+            "Configuration benchmarking and optimization",
+            "Metrics export for external analysis"
+        ],
+        "example_usage": {
+            "assess_single_query": {
+                "endpoint": "POST /rag-assessment",
+                "payload": {
+                    "query": "What are the key legal implications of this contract?",
+                    "collection_name": "legal_contracts",
+                    "model_name": "gpt-3.5-turbo",
+                    "top_k": 5,
+                    "include_quality_assessment": True
+                }
+            },
+            "get_analytics": {
+                "endpoint": "POST /rag-analytics",
+                "payload": {
+                    "time_period_hours": 24,
+                    "collection_name": "legal_contracts"
+                }
+            },
+            "benchmark_configs": {
+                "endpoint": "POST /rag-benchmark",
+                "payload": {
+                    "query_set": [
+                        "Analyze this contract for risks",
+                        "What are the compliance requirements?"
+                    ],
+                    "collection_name": "legal_docs",
+                    "configurations": [
+                        {"model_name": "gpt-3.5-turbo", "top_k": 5},
+                        {"model_name": "gpt-4", "top_k": 3},
+                        {"model_name": "gpt-4o", "top_k": 5}
+                        
+                    ]
+                }
+            }
+        }
+    }
+
+# =====================================================
+# Word Export Endpoints  
+# =====================================================
+
+@router.post("/export-agents-word")
+async def export_agents_to_word(agent_ids: List[int] = None, export_format: str = "detailed", db: Session = Depends(get_db)):
+    """
+    Export agent configurations to a Word document.
+    
+    Args:
+        agent_ids: Optional list of specific agent IDs to export. If None, exports all agents.
+        export_format: "summary" or "detailed" export format
+    """
+    try:
+        # Get agents from database
+        if agent_ids:
+            agents_query = db.query(ComplianceAgent).filter(ComplianceAgent.id.in_(agent_ids))
+        else:
+            agents_query = db.query(ComplianceAgent).all()
+        
+        agents = agents_query.all() if hasattr(agents_query, 'all') else agents_query
+        
+        if not agents:
+            raise HTTPException(status_code=404, detail="No agents found")
+        
+        # Convert to dict format for export
+        agents_data = []
+        for agent in agents:
+            agents_data.append({
+                "id": agent.id,
+                "name": agent.name,
+                "model_name": agent.model_name,
+                "system_prompt": agent.system_prompt,
+                "user_prompt_template": agent.user_prompt_template,
+                "temperature": agent.temperature,
+                "max_tokens": agent.max_tokens,
+                "created_at": agent.created_at.isoformat() if agent.created_at else None,
+                "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
+                "created_by": agent.created_by,
+                "is_active": agent.is_active,
+                "total_queries": agent.total_queries,
+                "avg_response_time_ms": agent.avg_response_time_ms,
+                "success_rate": agent.success_rate,
+                "chain_type": agent.chain_type
+            })
+        
+        # Generate Word document
+        word_bytes = word_export_service.export_agents_to_word(agents_data, export_format)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"agents_export_{timestamp}.docx"
+        
+        # Return as base64 for frontend download
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+        
+        return {
+            "filename": filename,
+            "content_b64": word_b64,
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "agents_exported": len(agents_data),
+            "export_format": export_format
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export agents to Word: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@router.post("/export-chat-history-word")
+async def export_chat_history_to_word(
+    session_id: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    Export chat history to a Word document.
+    
+    Args:
+        session_id: Optional session ID to filter by
+        limit: Maximum number of chat records to export
+    """
+    try:
+        # Query chat history
+        query = db.query(ChatHistory)
+        
+        if session_id:
+            query = query.filter(ChatHistory.session_id == session_id)
+        
+        chat_records = query.order_by(ChatHistory.timestamp.desc()).limit(limit).all()
+        
+        if not chat_records:
+            raise HTTPException(status_code=404, detail="No chat history found")
+        
+        # Convert to dict format
+        chat_data = []
+        for chat in chat_records:
+            chat_data.append({
+                "id": chat.id,
+                "user_query": chat.user_query,
+                "response": chat.response,
+                "model_used": chat.model_used,
+                "query_type": chat.query_type,
+                "response_time_ms": chat.response_time_ms,
+                "timestamp": chat.timestamp,
+                "session_id": chat.session_id,
+                "langchain_used": chat.langchain_used
+            })
+        
+        # Generate Word document
+        word_bytes = word_export_service.export_chat_history_to_word(chat_data, session_id)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_suffix = f"_session_{session_id[:8]}" if session_id else ""
+        filename = f"chat_history{session_suffix}_{timestamp}.docx"
+        
+        # Return as base64
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+        
+        return {
+            "filename": filename,
+            "content_b64": word_b64,
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "records_exported": len(chat_data),
+            "session_filter": session_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export chat history to Word: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@router.post("/export-simulation-word")
+async def export_agent_simulation_to_word(simulation_data: Dict[str, Any]):
+    """
+    Export agent simulation results to a Word document.
+    
+    Args:
+        simulation_data: Dictionary containing simulation results
+    """
+    try:
+        # Generate Word document
+        word_bytes = word_export_service.export_agent_simulation_to_word(simulation_data)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = simulation_data.get('session_id', 'unknown')[:8]
+        filename = f"agent_simulation_{session_id}_{timestamp}.docx"
+        
+        # Return as base64
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+        
+        return {
+            "filename": filename,
+            "content_b64": word_b64,
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "session_id": simulation_data.get('session_id'),
+            "simulation_type": simulation_data.get('type', 'unknown')
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to export agent simulation to Word: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@router.post("/export-rag-assessment-word")
+async def export_rag_assessment_to_word(assessment_data: Dict[str, Any]):
+    """
+    Export RAG assessment results to a Word document.
+    
+    Args:
+        assessment_data: Dictionary containing RAG assessment results
+    """
+    try:
+        # Generate Word document
+        word_bytes = word_export_service.export_rag_assessment_to_word(assessment_data)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = assessment_data.get('performance_metrics', {}).get('session_id', 'unknown')[:8]
+        filename = f"rag_assessment_{session_id}_{timestamp}.docx"
+        
+        # Return as base64
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+        
+        return {
+            "filename": filename,
+            "content_b64": word_b64,
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "session_id": assessment_data.get('performance_metrics', {}).get('session_id')
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to export RAG assessment to Word: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@router.get("/export-word-demo")
+async def word_export_demo():
+    """
+    Demo endpoint showing example usage of Word export capabilities.
+    """
+    return {
+        "demo": "Word Export Service",
+        "description": "Export agents, chat history, and simulation results to Word documents",
+        "available_exports": [
+            {
+                "endpoint": "POST /export-agents-word",
+                "description": "Export agent configurations",
+                "parameters": {
+                    "agent_ids": "Optional list of specific agent IDs",
+                    "export_format": "summary or detailed"
+                }
+            },
+            {
+                "endpoint": "POST /export-chat-history-word", 
+                "description": "Export chat conversation history",
+                "parameters": {
+                    "session_id": "Optional session ID filter",
+                    "limit": "Maximum records to export"
+                }
+            },
+            {
+                "endpoint": "POST /export-simulation-word",
+                "description": "Export agent simulation results",
+                "parameters": {
+                    "simulation_data": "Complete simulation results dictionary"
+                }
+            },
+            {
+                "endpoint": "POST /export-rag-assessment-word",
+                "description": "Export RAG assessment results",
+                "parameters": {
+                    "assessment_data": "Complete assessment results dictionary"
+                }
+            }
+        ],
+        "features": [
+            "Professional Word document formatting",
+            "Structured data presentation with tables",
+            "Session-based organization",
+            "Performance metrics inclusion",
+            "Base64 encoding for easy frontend integration",
+            "Automatic filename generation with timestamps"
+        ],
+        "example_usage": {
+            "export_all_agents": {
+                "endpoint": "POST /export-agents-word",
+                "payload": {
+                    "export_format": "detailed"
+                }
+            },
+            "export_specific_session": {
+                "endpoint": "POST /export-chat-history-word", 
+                "payload": {
+                    "session_id": "abc123def456",
+                    "limit": 25
+                }
+            }
+        }
+    }
+

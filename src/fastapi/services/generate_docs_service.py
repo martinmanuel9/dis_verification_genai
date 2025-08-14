@@ -3,7 +3,7 @@ import io
 import uuid
 import base64
 import requests
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any
 from docx import Document
 import fitz
 import markdown
@@ -138,19 +138,11 @@ class DocumentService:
         )
         return answer
     
-    def _reconstruct_template(self, doc_id: str, collection: str) -> str:
-        resp = requests.get(
-            f"{self.chroma_url}/documents/reconstruct/{doc_id}",
-            params={"collection_name": collection}
-        )
+    def _fetch_templates(self, collection: str) -> List[str]:
+        resp = requests.get(f"{self.chroma_url}/documents",
+                            params={"collection_name": collection})
         resp.raise_for_status()
-
-        data = resp.json()
-        text = data.get("reconstructed_content")
-        if text is None:
-            raise RuntimeError(f"No reconstructed_content in response: {list(data.keys())!r}")
-
-        return text
+        return resp.json().get("documents", [])
 
 
     def generate_documents(
@@ -169,10 +161,7 @@ class DocumentService:
         self.agent.load_selected_compliance_agents(agent_ids)
 
         # get raw markdown/text for each template
-        tpl_texts = [
-            self._reconstruct_template(tid, template_collection)
-            for tid in (template_doc_ids or [])
-        ]
+        tpl_texts = self._fetch_templates(template_collection)
 
         for tpl_text in tpl_texts:
             # extract all Markdown headings (#, ##, ###, etc.)
@@ -204,37 +193,205 @@ class DocumentService:
 
                 # 3) call your agent
                 agent_meta = next(a for a in self.agent.compliance_agents if a["id"] == agent_ids[0])
-                result = self.agent._invoke_chain(
-                    agent=agent_meta,
-                    data_sample=prompt,
-                    session_id=str(uuid.uuid4()),
-                    db=SessionLocal()
-                )
+                
+                # Use a consistent session_id for this document generation
+                doc_session_id = str(uuid.uuid4())
+                
+                # Create a proper database session and agent session for proper logging
+                db_session = SessionLocal()
+                try:
+                    
+                    # Create an agent session for proper foreign key relationships
+                    from services.database import log_agent_session, SessionType, AnalysisType
+                    log_agent_session(
+                        session_id=doc_session_id,
+                        session_type=SessionType.SINGLE_AGENT,
+                        analysis_type=AnalysisType.DIRECT_LLM,
+                        user_query=f"Document generation for section: {heading}"
+                    )
+                    
+                    result = self.agent._invoke_chain(
+                        agent=agent_meta,
+                        data_sample=prompt,
+                        session_id=doc_session_id,
+                        db=db_session
+                    )
+                except Exception as e:
+                    print(f"Error invoking agent: {e}")
+                    # Fallback: create a simple response
+                    result = {"reason": f"Error generating content for {heading}. Please try again."}
+                finally:
+                    db_session.close()
                 response_md = result["reason"]
 
                 # 4) convert the Markdown response into *real* docx
                 html = markdown.markdown(response_md)
                 soup = BeautifulSoup(html, "html.parser")
                 doc.add_heading(heading, level=2)
-                for el in soup.contents:
-                    if el.name and el.name.startswith("h"):
-                        lvl = int(el.name[1])
-                        doc.add_heading(el.get_text(), level=lvl)
+                
+                # Process all elements in the HTML
+                for el in soup.find_all(True):  # Find all elements, not just direct contents
+                    if not el.name:
+                        continue
+                        
+                    # Handle heading tags (h1, h2, h3, h4, h5, h6)
+                    if el.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                        try:
+                            lvl = int(el.name[1])  # Extract level from h1, h2, etc.
+                            # Ensure heading level is reasonable for Word doc (max level 9)
+                            lvl = min(lvl, 9)
+                            doc.add_heading(el.get_text(strip=True), level=lvl)
+                        except (ValueError, IndexError) as e:
+                            print(f"Warning: Could not parse heading level from {el.name}: {e}")
+                            doc.add_paragraph(el.get_text(strip=True))
+                    
+                    # Handle paragraph tags
                     elif el.name == "p":
-                        doc.add_paragraph(el.get_text())
+                        text = el.get_text(strip=True)
+                        if text:  # Only add non-empty paragraphs
+                            doc.add_paragraph(text)
+                    
+                    # Handle unordered lists
                     elif el.name == "ul":
-                        for li in el.find_all("li"):
-                            doc.add_paragraph(f"• {li.get_text()}")
+                        for li in el.find_all("li", recursive=False):  # Only direct li children
+                            text = li.get_text(strip=True)
+                            if text:
+                                doc.add_paragraph(f"• {text}")
+                    
+                    # Handle ordered lists
                     elif el.name == "ol":
-                        for idx, li in enumerate(el.find_all("li"), 1):
-                            doc.add_paragraph(f"{idx}. {li.get_text()}")
+                        for idx, li in enumerate(el.find_all("li", recursive=False), 1):  # Only direct li children
+                            text = li.get_text(strip=True)
+                            if text:
+                                doc.add_paragraph(f"{idx}. {text}")
+                    
+                    # Handle line breaks
+                    elif el.name == "br":
+                        doc.add_paragraph("")  # Add empty paragraph for line break
+                    
+                    # Handle other elements as plain text
+                    elif el.name in ["strong", "b", "em", "i", "span", "div"]:
+                        text = el.get_text(strip=True)
+                        if text and not el.find_parent(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li']):
+                            # Only add as paragraph if not already inside another handled element
+                            doc.add_paragraph(text)
 
             # 5) serialize to base64 & collect
             buf = io.BytesIO()
             doc.save(buf)
+            
+            # Extract plain text from the document for vector storage
+            doc_text = self._extract_text_from_docx_object(doc)
+            
+            # Store in vector database for future RAG queries
+            generated_doc_info = self._save_to_vector_store(
+                title=title,
+                content=doc_text,
+                template_collection=template_collection,
+                agent_ids=agent_ids,
+                session_id=doc_session_id
+            )
+            
             out.append({
                 "title":    title,
-                "docx_b64": base64.b64encode(buf.getvalue()).decode("utf-8")
+                "docx_b64": base64.b64encode(buf.getvalue()).decode("utf-8"),
+                "document_id": generated_doc_info.get("document_id"),
+                "collection_name": generated_doc_info.get("collection_name"),
+                "generated_at": generated_doc_info.get("generated_at")
             })
 
         return out
+    
+    def _extract_text_from_docx_object(self, doc) -> str:
+        """Extract plain text from a python-docx Document object"""
+        text_parts = []
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                text_parts.append(paragraph.text.strip())
+        return "\n\n".join(text_parts)
+    
+    def _save_to_vector_store(self, title: str, content: str, template_collection: str, 
+                            agent_ids: List[int], session_id: str) -> Dict[str, Any]:
+        """Save generated document to ChromaDB vector store"""
+        try:
+            from datetime import datetime
+            import json
+            
+            # Create a collection name for generated documents
+            generated_collection = "generated_documents"
+            
+            # First, ensure the collection exists
+            try:
+                # Check if collection exists by listing collections
+                list_response = requests.get(
+                    f"{self.chroma_url}/collections",
+                    timeout=5
+                )
+                
+                if list_response.ok:
+                    collections = list_response.json().get("collections", [])
+                    if generated_collection not in collections:
+                        # Collection doesn't exist, create it using the proper endpoint
+                        print(f"Creating collection '{generated_collection}'...")
+                        create_response = requests.post(
+                            f"{self.chroma_url}/collection/create",
+                            params={"collection_name": generated_collection},
+                            timeout=10
+                        )
+                        
+                        if create_response.ok:
+                            print(f"✅ Collection '{generated_collection}' created successfully")
+                        else:
+                            print(f"Failed to create collection: {create_response.status_code} - {create_response.text}")
+                    else:
+                        print(f"Collection '{generated_collection}' already exists")
+                else:
+                    print(f"Failed to list collections: {list_response.status_code} - {list_response.text}")
+                        
+            except Exception as e:
+                print(f"Collection setup error: {e}")
+            
+            # Create unique document ID
+            doc_id = f"gen_doc_{session_id}_{title.replace(' ', '_').replace('/', '_')}"
+            
+            # Prepare metadata
+            metadata = {
+                "title": title,
+                "type": "generated_document",
+                "template_collection": template_collection,
+                "agent_ids": json.dumps(agent_ids),
+                "session_id": session_id,
+                "generated_at": datetime.now().isoformat(),
+                "word_count": len(content.split()),
+                "char_count": len(content)
+            }
+            
+            # Store in ChromaDB via API
+            payload = {
+                "collection_name": generated_collection,
+                "documents": [content],
+                "metadatas": [metadata],
+                "ids": [doc_id]
+            }
+            
+            response = requests.post(
+                f"{self.chroma_url}/documents/add",
+                json=payload,
+                timeout=30
+            )
+            
+            if response.ok:
+                print(f"✅ Saved generated document to vector store: {doc_id}")
+                return {
+                    "document_id": doc_id,
+                    "collection_name": generated_collection,
+                    "generated_at": metadata["generated_at"],
+                    "saved": True
+                }
+            else:
+                print(f"❌ Failed to save to vector store: {response.status_code} - {response.text}")
+                return {"saved": False, "error": response.text}
+                
+        except Exception as e:
+            print(f"❌ Error saving to vector store: {e}")
+            return {"saved": False, "error": str(e)}

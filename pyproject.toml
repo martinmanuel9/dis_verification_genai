@@ -50,6 +50,8 @@ poppler-utils = "^0.1.0"
 redis = "^6.2.0"
 markdown = "^3.8.2"
 readability = "^0.3.2"
+plotly = "^6.3.0"
+tiktoken = "^0.8.0"
 
 
 [build-system]

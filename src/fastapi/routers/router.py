@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from sqlalchemy.orm import Session
 import time
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from services.database import ComplianceAgent, DebateSession, ChatHistory, SessionLocal
 from services.llm_service import LLMService
@@ -36,6 +36,7 @@ from schemas.database_schema import (
 from langchain_core.messages import HumanMessage
 from starlette.concurrency import run_in_threadpool
 import base64
+import redis
 
 
 import logging
@@ -61,6 +62,7 @@ class ChatRequest(BaseModel):
     model: str
     use_rag: bool = False
     collection_name: Optional[str] = None
+
 
 @router.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
@@ -170,6 +172,35 @@ async def compliance_check(request: ComplianceCheckRequest, db: Session = Depend
         )
         return result
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/generated-testplans")
+async def list_generated_testplans(limit: int = Query(20, ge=1, le=200)):
+    """List recent test plan runs indexed in Redis with basic metadata"""
+    try:
+        rhost = os.getenv("REDIS_HOST", "redis")
+        rport = int(os.getenv("REDIS_PORT", 6379))
+        rcli = redis.Redis(host=rhost, port=rport, decode_responses=True)
+        ids = rcli.zrevrange("doc:recent", 0, limit - 1) or []
+        results = []
+        for doc_id in ids:
+            meta = rcli.hgetall(f"doc:{doc_id}:meta") or {}
+            section_count = rcli.scard(f"doc:{doc_id}:sections")
+            results.append({
+                "redis_document_id": doc_id,
+                "title": meta.get("title", "Comprehensive Test Plan"),
+                "collection": meta.get("collection"),
+                "created_at": meta.get("created_at"),
+                "completed_at": meta.get("completed_at"),
+                "status": meta.get("status", "UNKNOWN"),
+                "section_count": int(section_count) if section_count is not None else None,
+                "total_testable_items": int(meta.get("total_testable_items", "0") or 0),
+                "total_test_procedures": int(meta.get("total_test_procedures", "0") or 0),
+                "generated_document_id": meta.get("generated_document_id")
+            })
+        return {"count": len(results), "runs": results}
+    except Exception as e:
+        logger.error(f"Failed to list generated test plans: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/rag-check")
@@ -788,30 +819,105 @@ doc_service = DocumentService(
 
 
 class GenerateRequest(BaseModel):
-    template_collection:  str
-    template_doc_ids:     Optional[List[str]]   = None
     source_collections:   Optional[List[str]]   = None
     source_doc_ids:       Optional[List[str]]   = None
-    agent_ids:            List[int]
     use_rag:              bool                  = True
     top_k:                int                   = 5
     doc_title:            str                   = None
+    pairwise_merge:       Optional[bool]        = False
+    actor_models:         Optional[List[str]]   = None
+    critic_model:         Optional[str]         = None
+    coverage_strategy:    Optional[str]         = "rag_by_heading"  # rag_by_heading | full_document | hybrid
+    max_actor_workers:    Optional[int]         = 4
+    critic_batch_size:    Optional[int]         = 15
+    critic_batch_char_cap: Optional[int]        = 8000
+    sectioning_strategy:  Optional[str]         = "auto"   # auto | by_chunks | by_metadata | by_pages
+    chunks_per_section:   Optional[int]         = 5
 
 @router.post("/generate_documents")
 async def generate_documents(req: GenerateRequest):
     logger.info("Received /generate_documents ⇒ %s", req)
     docs = await run_in_threadpool(
         doc_service.generate_documents,
-        req.template_collection,
-        req.template_doc_ids,
         req.source_collections,
         req.source_doc_ids,
-        req.agent_ids,
         req.use_rag,
         req.top_k,
-        req.doc_title
+        req.doc_title,
+        req.pairwise_merge,
+        req.actor_models,
+        req.critic_model,
+        req.coverage_strategy,
+        req.max_actor_workers,
+        req.critic_batch_size,
+        req.critic_batch_char_cap,
+        req.sectioning_strategy,
+        req.chunks_per_section
     )
     return {"documents": docs}
+
+class OptimizedTestPlanRequest(BaseModel):
+    source_collections:   Optional[List[str]]   = None
+    source_doc_ids:       Optional[List[str]]   = None
+    doc_title:            Optional[str]         = "Comprehensive Test Plan"
+    max_workers:          Optional[int]         = 4
+    sectioning_strategy:  Optional[str]         = "auto"
+    chunks_per_section:   Optional[int]         = 5
+
+@router.post("/generate_optimized_test_plan")
+async def generate_optimized_test_plan(req: OptimizedTestPlanRequest):
+    """
+    Generate test plan using the new optimized multi-agent workflow:
+    1. Extract rules/requirements per section with caching
+    2. Generate test steps per section
+    3. Consolidate into comprehensive test plan
+    4. Critic review and approval
+    5. O(log n) performance optimization
+    """
+    logger.info("Received /generate_optimized_test_plan ⇒ %s", req)
+    
+    try:
+        docs = await run_in_threadpool(
+            doc_service.generate_optimized_test_plan,
+            req.source_collections,
+            req.source_doc_ids,
+            req.doc_title,
+            req.max_workers,
+            req.sectioning_strategy,
+            req.chunks_per_section
+        )
+        return {"documents": docs}
+    except Exception as e:
+        logger.error(f"Error in optimized test plan generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Test plan generation failed: {str(e)}")
+
+# Note: MIL-style generation is handled via /generate_documents in generate_docs_service
+
+class PreviewRequest(BaseModel):
+    source_collections:   Optional[List[str]]   = None
+    source_doc_ids:       Optional[List[str]]   = None
+    sectioning_strategy:  Optional[str]         = "auto"
+    chunks_per_section:   Optional[int]         = 5
+    use_rag:              Optional[bool]        = True
+    top_k:                Optional[int]         = 5
+
+@router.post("/preview-sections")
+async def preview_sections(req: PreviewRequest):
+    try:
+        sections = await run_in_threadpool(
+            doc_service._extract_document_sections,
+            req.source_collections,
+            req.source_doc_ids,
+            req.use_rag,
+            req.top_k,
+            req.sectioning_strategy,
+            req.chunks_per_section,
+        )
+        names = list(sections.keys())
+        return {"count": len(names), "section_names": names[:500]}
+    except Exception as e:
+        logger.error(f"Preview sections failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
@@ -1329,6 +1435,26 @@ async def export_rag_assessment_to_word(assessment_data: Dict[str, Any]):
         logger.error(f"Failed to export RAG assessment to Word: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
+@router.post("/export-reconstructed-word")
+async def export_reconstructed_document_to_word(reconstructed: Dict[str, Any]):
+    """Export a reconstructed document (from ChromaDB) to a Word document using the central WordExportService."""
+    try:
+        word_bytes = word_export_service.export_reconstructed_document_to_word(reconstructed)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = reconstructed.get('document_name') or 'reconstructed_document'
+        # sanitize filename
+        safe_base = "".join(c for c in base if c.isalnum() or c in (' ', '_', '-')).strip() or 'reconstructed_document'
+        filename = f"{safe_base}_{timestamp}.docx"
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+        return {
+            "filename": filename,
+            "content_b64": word_b64,
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+    except Exception as e:
+        logger.error(f"Failed to export reconstructed document to Word: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
 @router.get("/export-word-demo")
 async def word_export_demo():
     """
@@ -1393,4 +1519,3 @@ async def word_export_demo():
             }
         }
     }
-

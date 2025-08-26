@@ -3,6 +3,11 @@ from langchain_ollama import OllamaLLM
 from langchain_openai import ChatOpenAI
 # from langchain_anthropic import ChatAnthropic
 
+# Disable LangSmith tracing to avoid rate limits
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+os.environ["LANGCHAIN_ENDPOINT"] = ""
+os.environ["LANGCHAIN_API_KEY"] = ""
+
 def get_llm(model_name: str):
     """
     Unified LLM loader for OpenAI and Ollama models.

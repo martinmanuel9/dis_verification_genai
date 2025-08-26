@@ -585,6 +585,42 @@ def extract_and_store_images_from_file(file_content: bytes, filename: str, temp_
     logger.info(f"Total images extracted from {filename}: {sum(len(p['images']) for p in pages_data)}")
     return pages_data
 
+def extract_text_by_page(file_content: bytes, filename: str, temp_dir: str) -> List[Dict]:
+    """Extract text per page from a PDF using PyPDF2."""
+    texts: List[Dict] = []
+    try:
+        temp_pdf_path = os.path.join(temp_dir, filename)
+        if not os.path.exists(temp_pdf_path):
+            with open(temp_pdf_path, 'wb') as f:
+                f.write(file_content)
+        reader = PdfReader(temp_pdf_path)
+        for page_num, page in enumerate(reader.pages, 1):
+            try:
+                txt = page.extract_text() or ""
+            except Exception as e:
+                logger.warning(f"Text extraction failed on page {page_num}: {e}")
+                txt = ""
+            texts.append({"page": page_num, "text": txt})
+    except Exception as e:
+        logger.error(f"Error extracting text by page from {filename}: {e}")
+    return texts
+
+def detect_section_title_from_page_text(text: str) -> str:
+    """Heuristic to detect a section title near the top of a page."""
+    try:
+        import re
+        lines = [ln.strip() for ln in (text or "").split('\n') if ln.strip()]
+        for ln in lines[:10]:
+            if re.match(r'^\d+(\.\d+)*\.?\s+[A-Z]', ln):  # 1. SCOPE or 4.2.1 REQUIREMENTS
+                return ln
+            if ln.isupper() and 5 < len(ln) < 80 and len(ln.split()) <= 10:
+                return ln
+            if ln.startswith(('APPENDIX', 'CHAPTER', 'SECTION', 'PART')):
+                return ln
+        return ""
+    except Exception:
+        return ""
+
 
 # def process_document_with_context(file_content: bytes, filename: str, temp_dir: str, doc_id: str, openai_api_key: str = None) -> Dict:
 #     """Process document maintaining context and storing images and their descriptions using MarkItDown"""
@@ -707,6 +743,177 @@ def extract_and_store_images_from_file(file_content: bytes, filename: str, temp_
 #         "file_type": file_extension
 #     }
 
+def use_structure_preserving_upload() -> bool:
+    """Check if we should use structure-preserving upload instead of chunking"""
+    return os.getenv("USE_STRUCTURE_PRESERVING_UPLOAD", "true").lower() == "true"
+
+def structure_preserving_process(content: str, images_data: List[Dict], document_name: str) -> List[Dict]:
+    """Process document while preserving its natural structure (sections, pages, etc.)"""
+    import re
+    
+    chunks = []
+    
+    # Try to detect if this is a multi-page document
+    page_separators = [
+        r'\n\s*Page \d+',
+        r'\n\s*\d+\s*\n\s*MIL-STD',
+        r'\n\s*APPENDIX [A-Z]',
+        r'\n\s*\d+\.\s+[A-Z][A-Za-z\s]+\n',
+        r'\n\s*[A-Z][A-Z\s]{10,}\s*\n'
+    ]
+    
+    # First, try to split by pages if page markers exist
+    page_splits = []
+    for pattern in page_separators:
+        if re.search(pattern, content, re.MULTILINE):
+            page_splits = re.split(pattern, content)
+            break
+    
+    if len(page_splits) > 1:
+        # Process as pages
+        logger.info(f"Processing {document_name} as {len(page_splits)} pages")
+        for page_idx, page_content in enumerate(page_splits):
+            if page_content.strip():
+                # Find images that belong to this page
+                page_images = find_images_for_section(page_content, images_data)
+                
+                chunk_data = {
+                    "content": page_content.strip(),
+                    "chunk_index": page_idx,
+                    "images": page_images,
+                    "page_number": page_idx + 1,
+                    "section_type": "page",
+                    "section_title": extract_section_title_from_content(page_content),
+                    "has_images": len(page_images) > 0,
+                    "start_position": page_idx * 2000,  # Estimated
+                    "end_position": (page_idx + 1) * 2000  # Estimated
+                }
+                chunks.append(chunk_data)
+    else:
+        # Process as sections based on headers
+        sections = extract_document_sections_from_content(content)
+        logger.info(f"Processing {document_name} as {len(sections)} sections")
+        
+        for section_idx, (section_title, section_content) in enumerate(sections.items()):
+            if section_content.strip():
+                # Find images that belong to this section
+                section_images = find_images_for_section(section_content, images_data)
+                
+                chunk_data = {
+                    "content": section_content.strip(),
+                    "chunk_index": section_idx,
+                    "images": section_images,
+                    "section_number": section_idx + 1,
+                    "section_type": "logical_section",
+                    "section_title": section_title,
+                    "has_images": len(section_images) > 0,
+                    "start_position": section_idx * 3000,  # Estimated
+                    "end_position": (section_idx + 1) * 3000  # Estimated
+                }
+                chunks.append(chunk_data)
+    
+    # If no structure detected, fall back to one large chunk
+    if not chunks:
+        chunk_data = {
+            "content": content.strip(),
+            "chunk_index": 0,
+            "images": images_data,
+            "section_number": 1,
+            "section_type": "complete_document",
+            "section_title": document_name,
+            "has_images": len(images_data) > 0,
+            "start_position": 0,
+            "end_position": len(content)
+        }
+        chunks.append(chunk_data)
+    
+    logger.info(f"Structure-preserving processing created {len(chunks)} chunks for {document_name}")
+    return chunks
+
+def extract_document_sections_from_content(content: str) -> Dict[str, str]:
+    """Extract logical sections from document content based on headers"""
+    import re
+    
+    sections = {}
+    lines = content.split('\n')
+    current_section_title = "Introduction"
+    current_section_content = []
+    
+    for line in lines:
+        line_clean = line.strip()
+        
+        # Check for section headers - various patterns for military standards
+        is_section_header = False
+        header_title = ""
+        
+        if line_clean:
+            # Pattern 1: Numbered sections (4.1, 5.1.13, etc.)
+            if re.match(r'^\d+(\.\d+)*\.?\s+[A-Z]', line_clean):
+                is_section_header = True
+                header_title = line_clean
+            # Pattern 2: ALL CAPS headers
+            elif line_clean.isupper() and len(line_clean.split()) <= 8 and len(line_clean) > 5:
+                is_section_header = True
+                header_title = line_clean
+            # Pattern 3: APPENDIX headers
+            elif line_clean.startswith(('APPENDIX', 'CHAPTER', 'SECTION', 'PART')):
+                is_section_header = True
+                header_title = line_clean
+            # Pattern 4: Headers with specific keywords
+            elif any(keyword in line_clean.upper() for keyword in ['REQUIREMENTS', 'SPECIFICATIONS', 'PROCEDURES', 'TESTING', 'CONFIGURATION']):
+                if len(line_clean.split()) <= 10:
+                    is_section_header = True
+                    header_title = line_clean
+        
+        if is_section_header and current_section_content:
+            # Save previous section
+            sections[current_section_title] = '\n'.join(current_section_content)
+            current_section_title = header_title
+            current_section_content = []
+        else:
+            current_section_content.append(line)
+    
+    # Add the last section
+    if current_section_content:
+        sections[current_section_title] = '\n'.join(current_section_content)
+    
+    return sections
+
+def extract_section_title_from_content(content: str) -> str:
+    """Extract a meaningful title from section content"""
+    import re
+    
+    lines = content.split('\n')
+    for line in lines[:5]:  # Check first 5 lines
+        line_clean = line.strip()
+        if line_clean:
+            # Look for numbered sections or headers
+            if re.match(r'^\d+(\.\d+)*\.?\s+[A-Z]', line_clean):
+                return line_clean
+            elif line_clean.isupper() and len(line_clean.split()) <= 8:
+                return line_clean
+            elif line_clean.startswith(('APPENDIX', 'CHAPTER', 'SECTION')):
+                return line_clean
+    
+    # Fallback to first substantial line
+    for line in lines[:10]:
+        line_clean = line.strip()
+        if len(line_clean) > 10 and len(line_clean) < 100:
+            return line_clean
+    
+    return "Untitled Section"
+
+def find_images_for_section(section_content: str, images_data: List[Dict]) -> List[Dict]:
+    """Find images that belong to a specific section"""
+    section_images = []
+    
+    for img in images_data:
+        marker = img.get('position_marker', '')
+        if marker and marker in section_content:
+            section_images.append(img)
+    
+    return section_images
+
 def smart_chunk_with_context(content: str, images_data: List[Dict], chunk_size: int = 1000, overlap: int = 200) -> List[Dict]:
     """Enhanced chunking that preserves image context and references"""
     
@@ -778,21 +985,6 @@ def smart_chunk_with_context(content: str, images_data: List[Dict], chunk_size: 
     logger.info(f"Created {len(chunks)} chunks total")
     return chunks
 
-# def debug_content_and_images(content: str, images_data: List[Dict]):
-#     """Debug helper to show content and image integration"""
-#     logger.info("=== CONTENT AND IMAGE INTEGRATION DEBUG ===")
-#     logger.info(f"Content length: {len(content)} characters")
-#     logger.info(f"Number of images: {len(images_data)}")
-    
-#     for i, img_data in enumerate(images_data):
-#         marker = img_data['position_marker']
-#         pos = content.find(marker)
-#         logger.info(f"Image {i+1}: {img_data['filename']} -> Marker: {marker} -> Position: {pos}")
-    
-#     # Show first 1000 characters of content
-#     sample = content[:1000] + "..." if len(content) > 1000 else content
-#     logger.info(f"Content sample: {sample}")
-#     logger.info("=== END DEBUG ===")
     
 def create_combined_description(all_descriptions: dict, filename: str) -> str:
     """Create a comprehensive description combining all vision model outputs"""
@@ -983,17 +1175,34 @@ def run_ingest_job(
     model_name: str,
     vision_models: List[str],
     openai_api_key: Optional[str],
+    enable_ocr: bool,
 ):
     # initialize a hash: status + zeroed counters
     progress_key = f"job:{job_id}:progress"
+    docs_key = f"job:{job_id}:documents"
     # jobs[job_id] = "running"
     redis_client.set(job_id, "running")
 
-    # initialize the hash strictly on the “progress” key
+    # initialize the hash strictly on the "progress" key
     redis_client.hset(progress_key, mapping={
         "total_chunks":     0,
-        "processed_chunks": 0
+        "processed_chunks": 0,
+        "total_documents": len(payloads),
+        "processed_documents": 0
     })
+    
+    # Initialize document status tracking
+    for i, payload in enumerate(payloads):
+        doc_status_key = f"job:{job_id}:doc:{i}"
+        redis_client.hset(doc_status_key, mapping={
+            "filename": payload["filename"],
+            "status": "pending",  # pending, processing, completed, failed
+            "chunks_total": 0,
+            "chunks_processed": 0,
+            "start_time": "",
+            "end_time": "",
+            "error_message": ""
+        })
 
     # decide thread-pool size
     max_workers = min(4, os.cpu_count() or 1)
@@ -1004,102 +1213,253 @@ def run_ingest_job(
         client = Client(settings)
         return client.get_collection(name=collection_name)
 
-    def process_one(item):
+    def process_one(item_with_index):
+        item, doc_index = item_with_index
         fname = item["filename"]
         content = item["content"]
         document_id =  uuid.uuid4().hex 
+        doc_status_key = f"job:{job_id}:doc:{doc_index}"
 
-        ext = Path(fname).suffix.lower()
-        # 1) extract images
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            if ext == ".pdf":
-                pages_data = extract_and_store_images_from_file(content, fname, tmp_dir, fname)
+        # Update document status to processing
+        redis_client.hset(doc_status_key, mapping={
+            "status": "processing",
+            "start_time": datetime.datetime.now().isoformat()
+        })
 
-            elif ext == ".docx":
-                pages_data = extract_images_from_docx(content, fname, tmp_dir, fname)
+        try:
+            ext = Path(fname).suffix.lower()
+            # 1) extract images and process document within same temp directory
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                if ext == ".pdf":
+                    pages_data = extract_and_store_images_from_file(content, fname, tmp_dir, fname)
 
-            elif ext == ".xlsx":
-                pages_data = extract_images_from_xlsx(content, fname, tmp_dir, fname)
+                elif ext == ".docx":
+                    pages_data = extract_images_from_docx(content, fname, tmp_dir, fname)
 
-            elif ext in (".html", ".htm"):
-                pages_data = extract_images_from_html(content, fname, tmp_dir, fname)
+                elif ext == ".xlsx":
+                    pages_data = extract_images_from_xlsx(content, fname, tmp_dir, fname)
 
-            else:
-                # txt, csv, pptx, etc → no images
-                pages_data = [{"page": 1, "images": [], "text": None}]
+                elif ext in (".html", ".htm"):
+                    pages_data = extract_images_from_html(content, fname, tmp_dir, fname)
 
-            # 2) describe images
-            pages_data = asyncio.new_event_loop().run_until_complete(
-                describe_images_for_pages(
-                    pages_data,
-                    api_key_override=openai_api_key,
-                    run_all_models=len(vision_models) > 1,
-                    enabled_models=set(vision_models),
-                    vision_flags={m: (m in vision_models) for m in vision_models},
+                else:
+                    # txt, csv, pptx, etc → no images
+                    pages_data = [{"page": 1, "images": [], "text": None}]
+
+                # 2) describe images
+                pages_data = asyncio.new_event_loop().run_until_complete(
+                    describe_images_for_pages(
+                        pages_data,
+                        api_key_override=openai_api_key,
+                        run_all_models=len(vision_models) > 1,
+                        enabled_models=set(vision_models),
+                        vision_flags={m: (m in vision_models) for m in vision_models},
+                    )
                 )
-            )
 
-            # 3) full-document processing
-            doc_data = process_document_with_context_multi_model(
-                file_content=content,
-                filename=fname,
-                temp_dir=tmp_dir,
-                doc_id=fname,
-                openai_api_key=openai_api_key,
-                run_all_models=len(vision_models) > 1,
-                selected_models=set(vision_models),
-                vision_flags={m: (m in vision_models) for m in vision_models},
-            )
+                # 3) Build chunks (prefer page-based for PDFs)
+                use_page_chunking = True if ext == ".pdf" else False
 
-            # 4) chunk → embed → insert
-            chunks = smart_chunk_with_context(doc_data["content"],
-                                          doc_data["images_data"],
-                                          chunk_size, chunk_overlap)
+                if use_page_chunking:
+                    # Extract page texts and correlate with images
+                    page_texts = extract_text_by_page(content, fname, tmp_dir)
+                    page_text_map = {p["page"]: (p.get("text") or "") for p in page_texts}
 
-            # bump our total_chunks counter by however many we're about to insert
-            redis_client.hincrby(progress_key, "total_chunks", len(chunks))
-            coll = get_chromadb_collection()
-            
-            for c in chunks:
-                text = c["content"]
-                # build metadata dict for this chunk:
-                meta = {
-                    "document_id": document_id,
-                    "document_name": fname,
-                    "file_type": doc_data["file_type"],
-                    "chunk_index": c["chunk_index"],
-                    "total_chunks": len(chunks),
-                    "has_images": c["has_images"],
-                    "image_count": len(c["images"]),
-                    "start_position": c["start_position"],
-                    "end_position": c["end_position"],
-                    "images_stored": store_images,
-                    "timestamp": datetime.datetime.now().isoformat(),
-                }
+                    chunks = []
+                    for page in pages_data:
+                        pg = page.get("page") or 0
+                        pg_text = page_text_map.get(pg, "")
+                        img_list = []
+                        for img_path, desc in zip(page.get("images", []), page.get("image_descriptions", [])):
+                            img_list.append({
+                                "filename": Path(img_path).name,
+                                "storage_path": img_path,
+                                "description": desc,
+                            })
+                        page_ocr_used = False
+                        # OCR fallback if no text extracted
+                        if enable_ocr and not (pg_text or "").strip() and img_list:
+                            ocr_texts = []
+                            for img in img_list:
+                                try:
+                                    with Image.open(img["storage_path"]) as im:
+                                        ocr_text = pytesseract.image_to_string(im)
+                                        if ocr_text and ocr_text.strip():
+                                            ocr_texts.append(ocr_text.strip())
+                                except Exception as e:
+                                    logger.warning(f"OCR failed for image {img['filename']}: {e}")
+                            if ocr_texts:
+                                pg_text = "\n".join(ocr_texts)
+                                page_ocr_used = True
+                        # Ensure we have some minimal content to embed
+                        if not (pg_text or "").strip():
+                            pg_text = f"Page {pg}: [no extractable text]"
+                        chunks.append({
+                            "content": pg_text.strip(),
+                            "chunk_index": max(0, int(pg) - 1),
+                            "images": img_list,
+                            "page_number": pg,
+                            "section_type": "page",
+                            "section_title": "",
+                            "has_images": len(img_list) > 0,
+                            "ocr_used": page_ocr_used,
+                            "start_position": 0,
+                            "end_position": len(pg_text or ""),
+                        })
+                    logger.info(f"Page-based chunking created {len(chunks)} chunks for {fname}")
+                else:
+                    # full-document processing
+                    doc_data = process_document_with_context_multi_model(
+                        file_content=content,
+                        filename=fname,
+                        temp_dir=tmp_dir,
+                        doc_id=fname,
+                        openai_api_key=openai_api_key,
+                        run_all_models=len(vision_models) > 1,
+                        selected_models=set(vision_models),
+                        vision_flags={m: (m in vision_models) for m in vision_models},
+                    )
+
+                    # Structure-preserving processing → embed → insert
+                    try:
+                        if use_structure_preserving_upload():
+                            logger.info(f"Using structure-preserving upload for {fname}")
+                            chunks = structure_preserving_process(doc_data["content"],
+                                                                doc_data["images_data"],
+                                                                fname)
+                            logger.info(f"Structure-preserving processing completed: {len(chunks)} chunks")
+                        else:
+                            # Fallback to original chunking
+                            logger.info(f"Using traditional chunking for {fname}")
+                            chunks = smart_chunk_with_context(doc_data["content"],
+                                                          doc_data["images_data"],
+                                                          chunk_size, chunk_overlap)
+                    except Exception as e:
+                        logger.error(f"Error in document processing for {fname}: {e}")
+                        logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
+                        # Fallback to original chunking if structure-preserving fails
+                        logger.info(f"Falling back to traditional chunking for {fname}")
+                        try:
+                            chunks = smart_chunk_with_context(doc_data["content"],
+                                                          doc_data["images_data"],
+                                                          chunk_size, chunk_overlap)
+                            logger.info(f"Traditional chunking successful: {len(chunks)} chunks created")
+                        except Exception as fallback_error:
+                            logger.error(f"CRITICAL: Both processing methods failed for {fname}: {fallback_error}")
+                            raise fallback_error
+
+                # Update document chunk count
+                redis_client.hset(doc_status_key, "chunks_total", len(chunks))
+
+                # bump our total_chunks counter by however many we're about to insert
+                redis_client.hincrby(progress_key, "total_chunks", len(chunks))
+                coll = get_chromadb_collection()
                 
-                filenames = [img["filename"] for img in c["images"]]
-                paths     = [img["storage_path"] for img in c["images"]]
-                descs     = [img["description"] for img in c["images"]]
+                for c in chunks:
+                    try:
+                        text = c["content"]
+                        # Debug: Log available fields in chunk
+                        logger.debug(f"[{job_id}] Chunk {c.get('chunk_index', 'unknown')} fields: {list(c.keys())}")
+                        # build metadata dict for this chunk - ChromaDB only accepts str, int, float, bool (NO None values)
+                        meta = {
+                            "document_id": document_id,
+                            "document_name": fname,
+                            "file_type": ext,
+                            "chunk_index": c.get("chunk_index", 0),
+                            "total_chunks": len(chunks),
+                            # New structure-preserving metadata - ensuring no None values
+                            "section_title": c.get("section_title", ""),
+                            "section_type": c.get("section_type", "chunk"),
+                            "page_number": c.get("page_number", -1),  # Use -1 instead of None
+                            "section_number": c.get("section_number", -1),  # Use -1 instead of None
+                            "has_images": c.get("has_images", False),
+                            "image_count": len(c.get("images", [])),
+                            "start_position": c.get("start_position", 0),
+                            "end_position": c.get("end_position", len(text)),
+                            "images_stored": store_images,
+                            "timestamp": datetime.datetime.now().isoformat(),
+                        }
+                        
+                        filenames = [img["filename"] for img in c.get("images", [])]
+                        paths     = [img["storage_path"] for img in c.get("images", [])]
+                        descs     = [img.get("description", "") for img in c.get("images", [])]
 
-                meta["image_filenames"]     = json.dumps(filenames)
-                meta["image_storage_paths"] = json.dumps(paths)
-                meta["image_descriptions"]  = json.dumps(descs)
-                # embed one chunk at a time
-                emb = embedding_model.encode([text], 
-                                            convert_to_numpy=True, 
-                                            batch_size=1).tolist()
-                coll.add(documents=[text],
-                        embeddings=emb,
-                        metadatas=[meta],
-                        ids=[f"{fname}_chunk_{c['chunk_index']}"]
-                )
-                redis_client.hincrby(progress_key, "processed_chunks", 1)
-                logger.info(f"[{job_id}] Ingested chunk {c['chunk_index']} for {fname} with {len(c['images'])} images")
-        return fname
+                        meta["image_filenames"]     = json.dumps(filenames)
+                        meta["image_storage_paths"] = json.dumps(paths)
+                        meta["image_descriptions"]  = json.dumps(descs)
+                        # Derive which vision models were used from description prefixes
+                        models_used = set()
+                        for d in descs:
+                            if not d:
+                                continue
+                            ld = d.lower()
+                            if ld.startswith("openai vision"):
+                                models_used.add("openai")
+                            elif ld.startswith("ollama vision"):
+                                models_used.add("ollama")
+                            elif ld.startswith("huggingface blip"):
+                                models_used.add("huggingface")
+                            elif ld.startswith("enhanced local"):
+                                models_used.add("enhanced_local")
+                            elif ld.startswith("basic fallback"):
+                                models_used.add("basic")
+                        meta["vision_models_used"] = json.dumps(sorted(models_used))
+                        meta["openai_api_used"] = ("openai" in models_used)
+                        meta["ocr_used"] = bool(c.get("ocr_used", False))
+                        
+                        # Validate metadata to ensure ChromaDB compatibility (no None values)
+                        validated_meta = {}
+                        for key, value in meta.items():
+                            if value is None:
+                                logger.warning(f"[{job_id}] Replacing None value for key '{key}' with empty string")
+                                validated_meta[key] = ""
+                            elif isinstance(value, (str, int, float, bool)):
+                                validated_meta[key] = value
+                            else:
+                                logger.warning(f"[{job_id}] Converting non-standard type {type(value)} for key '{key}' to string")
+                                validated_meta[key] = str(value)
+                        meta = validated_meta
+                        
+                        # embed one chunk at a time
+                        emb = embedding_model.encode([text], 
+                                                    convert_to_numpy=True, 
+                                                    batch_size=1).tolist()
+                        coll.add(documents=[text],
+                                embeddings=emb,
+                                metadatas=[meta],
+                                ids=[f"{fname}_chunk_{c['chunk_index']}"]
+                        )
+                        redis_client.hincrby(progress_key, "processed_chunks", 1)
+                        redis_client.hincrby(doc_status_key, "chunks_processed", 1)
+                        logger.info(f"[{job_id}] Ingested chunk {c['chunk_index']} for {fname} with {len(c.get('images', []))} images")
+                    
+                    except Exception as chunk_error:
+                        logger.error(f"[{job_id}] Error processing chunk {c.get('chunk_index', 'unknown')} for {fname}: {chunk_error}")
+                        # Mark this chunk as failed but continue with others
+                        redis_client.hincrby(doc_status_key, "chunks_failed", 1)
+                        continue
+
+            # Document completed successfully
+            redis_client.hset(doc_status_key, mapping={
+                "status": "completed",
+                "end_time": datetime.datetime.now().isoformat()
+            })
+            redis_client.hincrby(progress_key, "processed_documents", 1)
+            return fname
+            
+        except Exception as e:
+            # Document failed
+            redis_client.hset(doc_status_key, mapping={
+                "status": "failed",
+                "end_time": datetime.datetime.now().isoformat(),
+                "error_message": str(e)
+            })
+            logger.error(f"[{job_id}] Error processing document {fname}: {e}")
+            raise
 
     # launch threads
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = { pool.submit(process_one, p): p["filename"] for p in payloads }
+        futures = { pool.submit(process_one, (p, i)): p["filename"] for i, p in enumerate(payloads) }
         for fut in as_completed(futures):
             fname = futures[fut]
             try:
@@ -1548,6 +1908,7 @@ async def upload_and_process_documents(
     store_images: bool = Query(True),
     model_name: str = Query("none"),
     vision_models: str = Query(""),
+    enable_ocr: bool = Query(False),
     request: Request = None,
 ):
     # 1) Validate collection
@@ -1578,6 +1939,7 @@ async def upload_and_process_documents(
         model_name,
         selected_models,
         request.headers.get("X-OpenAI-API-Key") or open_ai_api_key,
+        enable_ocr,
     )
 
     # 5) Return immediately with the job ID
@@ -1588,7 +1950,8 @@ async def upload_and_process_documents(
 @app.get("/documents/reconstruct/{document_id}")
 def reconstruct_document(document_id: str, collection_name: str = Query(...)):
     """
-    Reconstruct original document from stored chunks and images with enhanced formatting.
+    Reconstruct original document from stored chunks and images, using chunk metadata
+    (section titles, section types, page numbers) to format headings and structure.
     """
     try:
         collection = chroma_client.get_collection(name=collection_name)
@@ -1615,29 +1978,58 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
         chunks_data.sort(key=lambda x: x["chunk_index"])
 
         document_name = chunks_data[0]["metadata"].get("document_name", "UNKNOWN")
-        reconstructed_content = f"# Document: {document_name}\n\n"
+        lines: list[str] = [f"# Document: {document_name}", ""]
         all_images = []
+        ocr_pages = 0
+        vision_union = set()
         image_counter = 1
+        last_section_title = None
+        last_page_number = None
 
         for chunk in chunks_data:
-            content = chunk["content"]
+            md = chunk["metadata"]
+            content = chunk["content"] or ""
 
-            page_info = chunk["metadata"].get("page", None)
-            if page_info:
-                content = f"\nPage: {page_info}\n\n" + content
+            # Heading decisions based on metadata
+            section_title = md.get("section_title") or ""
+            section_type = (md.get("section_type") or "").lower()
+            page_number = md.get("page_number")
 
-            # Replace image markers with markdown-style descriptions
-            if chunk["metadata"].get("has_images"):
+            if section_title and section_title != last_section_title:
+                lines.append(f"## {section_title}")
+                last_section_title = section_title
+            elif not section_title and not section_type:
+                # legacy: prepend page info if available
+                legacy_page = md.get("page")
+                if legacy_page:
+                    pass  # Do not add page headings per user preference
+
+            # Aggregate per-chunk metadata for summary
+            try:
+                if md.get("ocr_used"):
+                    ocr_pages += 1
+                vm_raw = md.get("vision_models_used")
+                if vm_raw:
+                    vm_list = json.loads(vm_raw) if isinstance(vm_raw, str) else vm_raw
+                    if isinstance(vm_list, list):
+                        for v in vm_list:
+                            if isinstance(v, str):
+                                vision_union.add(v)
+            except Exception:
+                pass
+
+            # Replace image markers with markdown-style descriptions and collect image info
+            if md.get("has_images"):
                 try:
-                    image_filenames = json.loads(chunk["metadata"].get("image_filenames", "[]"))
-                    image_paths = json.loads(chunk["metadata"].get("image_storage_paths", "[]"))
-                    image_descriptions = json.loads(chunk["metadata"].get("image_descriptions", "[]"))
+                    image_filenames = json.loads(md.get("image_filenames", "[]"))
+                    image_paths = json.loads(md.get("image_storage_paths", "[]"))
+                    image_descriptions = json.loads(md.get("image_descriptions", "[]"))
 
                     for filename, path, desc in zip(image_filenames, image_paths, image_descriptions):
                         markdown_img = (
                             f"\n\n[Image {image_counter}]:\n"
                             f"# Description:\n"
-                            f"{desc.strip()}\n"
+                            f"{(desc or '').strip()}\n"
                         )
                         marker = f"[IMAGE:{filename}]"
                         content = content.replace(marker, markdown_img)
@@ -1653,19 +2045,24 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
                 except Exception as e:
                     logger.error(f"Failed to insert images: {e}")
 
-            reconstructed_content += content + "\n\n"
+            lines.append(content)
+            lines.append("")
+
+        reconstructed_content = "\n".join(lines).strip()
 
         return {
             "document_id": document_id,
             "document_name": chunks_data[0]["metadata"].get("document_name", "Unknown"),
             "total_chunks": len(chunks_data),
-            "reconstructed_content": reconstructed_content.strip(),
+            "reconstructed_content": reconstructed_content,
             "images": all_images,
             "metadata": {
                 "file_type": chunks_data[0]["metadata"].get("file_type"),
                 "total_images": len(all_images),
                 "processing_timestamp": chunks_data[0]["metadata"].get("timestamp"),
-                "openai_api_used": chunks_data[0]["metadata"].get("openai_api_used", False)
+                "openai_api_used": ("openai" in vision_union) or chunks_data[0]["metadata"].get("openai_api_used", False),
+                "ocr_pages": int(ocr_pages),
+                "vision_models_used": sorted(list(vision_union)),
             }
         }
 
@@ -1707,11 +2104,34 @@ def get_job_status(job_id: str):
     
     status = redis_client.get(job_id)
     prog   = redis_client.hgetall(f"job:{job_id}:progress") or {}
+    
+    # Get document statuses
+    documents = []
+    total_docs = int(prog.get("total_documents", 0))
+    
+    for i in range(total_docs):
+        doc_status_key = f"job:{job_id}:doc:{i}"
+        doc_status = redis_client.hgetall(doc_status_key)
+        if doc_status:
+            documents.append({
+                "index": i,
+                "filename": doc_status.get("filename", ""),
+                "status": doc_status.get("status", "pending"),
+                "chunks_total": int(doc_status.get("chunks_total", 0)),
+                "chunks_processed": int(doc_status.get("chunks_processed", 0)),
+                "start_time": doc_status.get("start_time", ""),
+                "end_time": doc_status.get("end_time", ""),
+                "error_message": doc_status.get("error_message", "")
+            })
+    
     return {
         "job_id": job_id,
         "status": status,
-        "total_chunks":     int(prog.get("total_chunks",     0)),
+        "total_chunks": int(prog.get("total_chunks", 0)),
         "processed_chunks": int(prog.get("processed_chunks", 0)),
+        "total_documents": int(prog.get("total_documents", 0)),
+        "processed_documents": int(prog.get("processed_documents", 0)),
+        "documents": documents
     }
     
 ## html scraping 

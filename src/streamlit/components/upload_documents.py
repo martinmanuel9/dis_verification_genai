@@ -7,6 +7,7 @@ import re
 import pandas as pd
 
 CHROMADB_API = os.getenv("CHROMA_URL", "http://localhost:8020")
+FASTAPI_API = os.getenv("FASTAPI_URL", "http://localhost:9020")
 
 def browse_documents(key_prefix: str = "",):
     def pref(k): return f"{key_prefix}_{k}" if key_prefix else k
@@ -65,17 +66,25 @@ def view_images(key_prefix: str = "",):
     def pref(k): return f"{key_prefix}_{k}" if key_prefix else k
     if st.session_state.collections:
         reconstruct_collection = st.selectbox("Select Collection", st.session_state.collections, key=pref("reconstruct_collection"))
-        
-        # Use selected document ID if available, otherwise latest uploaded
-        default_doc_id = st.session_state.get('selected_doc_id', st.session_state.get('latest_doc_id', ""))
-        
-        document_id = st.text_input(
-            "Document ID",
-            placeholder="Enter the document ID to reconstruct (or select from Browse section above)",
-            value=default_doc_id
+
+        # Load documents in the selected collection (like Document Generator)
+        if st.button("Load Documents", key=pref("load_reconstruct_docs")):
+            try:
+                with st.spinner("Loading documents…"):
+                    st.session_state.reconstruct_docs = utils.get_all_documents_in_collection(reconstruct_collection)
+            except Exception as e:
+                st.error(f"Failed to load documents: {e}")
+
+        docs = st.session_state.get("reconstruct_docs", [])
+        name_to_id = {d["document_name"]: d["document_id"] for d in docs}
+        selected_name = st.selectbox(
+            "Select Document",
+            list(name_to_id.keys()) if docs else [],
+            key=pref("reconstruct_doc_select")
         )
-        
-        if st.button("Reconstruct Document", disabled=not document_id, key="reconstruct_document"):
+        document_id = name_to_id.get(selected_name)
+
+        if st.button("Reconstruct Document", disabled=not document_id, key=pref("reconstruct_document")):
             try:
                 with st.spinner("Reconstructing document..."):
                     response = requests.get(
@@ -96,37 +105,47 @@ def view_images(key_prefix: str = "",):
                         st.write(f"**Total Chunks**: {result['total_chunks']}")
                         st.write(f"**File Type**: {result['metadata']['file_type']}")
                         st.write(f"**Total Images**: {result['metadata']['total_images']}")
+                        if 'ocr_pages' in result.get('metadata', {}):
+                            st.write(f"**Pages with OCR**: {result['metadata']['ocr_pages']}")
+                        vm_used = result.get('metadata', {}).get('vision_models_used') or []
+                        if vm_used:
+                            st.write(f"**Vision Models Used**: {', '.join(vm_used)}")
 
                     # Build rich markdown with embedded images
                     utils.render_reconstructed_document(result)
 
                     # ---- EXPORT DOCUMENTS ----
                     with st.expander("Export Document"):
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            if st.button("Generate DOCX", key=pref("generate_docx")):
-                                with st.spinner("Generating DOCX..."):
-                                    docx_path = utils.export_to_docx(result)
-                                    with open(docx_path, "rb") as f:
+                        # Use centralized FastAPI word_export_service for Word export
+                        if st.button("Export to Word", key=pref("export_reconstructed_word")):
+                            try:
+                                with st.spinner("Generating Word document…"):
+                                    export_resp = requests.post(
+                                        f"{FASTAPI_API}/export-reconstructed-word",
+                                        json=result,
+                                        timeout=60
+                                    )
+                                if export_resp.ok:
+                                    payload = export_resp.json()
+                                    b64 = payload.get("content_b64")
+                                    filename = payload.get("filename", f"{result['document_name']}.docx")
+                                    if b64:
+                                        import base64
+                                        blob = base64.b64decode(b64)
                                         st.download_button(
-                                            label="Download DOCX",
-                                            data=f,
-                                            file_name=f"{result['document_name']}.docx",
-                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                            label=f"Download {filename}",
+                                            data=blob,
+                                            file_name=filename,
+                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            key=pref("download_reconstructed_word")
                                         )
-
-                        with col2:
-                            if st.button("Generate PDF", key=pref("generate_pdf")):
-                                with st.spinner("Generating PDF..."):
-                                    pdf_path = utils.export_to_pdf(result)
-                                    with open(pdf_path, "rb") as f:
-                                        st.download_button(
-                                            label="Download PDF",
-                                            data=f,
-                                            file_name=f"{result['document_name']}.pdf",
-                                            mime="application/pdf"
-                                        )
+                                        st.success("Word document ready!")
+                                    else:
+                                        st.error("No file returned from export service.")
+                                else:
+                                    st.error(f"Export failed: {export_resp.status_code} {export_resp.text}")
+                            except Exception as e:
+                                st.error(f"Error exporting Word: {e}")
 
                 elif response.status_code == 404:
                     st.error("Document not found")
@@ -288,7 +307,7 @@ def render_upload_component(
                         "chunk_overlap": chunk_overlap,
                         "store_images": True,
                         "model_name": "enhanced",
-                        "vision_models": ",".join(vision_models)
+                        "vision_models": ",".join(vision_models),
                     }
 
                     try:
@@ -296,56 +315,125 @@ def render_upload_component(
                             resp = requests.post(upload_endpoint, files=files, params=params, timeout=300)
                             resp.raise_for_status()
                             job_id = resp.json().get("job_id")
-                        progress = st.progress(0)
-                        status_text = st.empty()
+                        # Overall progress
+                        overall_progress = st.progress(0)
+                        overall_status_text = st.empty()
+                        
+                        # Document-specific progress containers
+                        doc_containers = {}
+                        doc_progress_bars = {}
+                        doc_status_texts = {}
+                        
                         while True:
                             time.sleep(1)
-                            status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
-                            total = status.get("total_chunks", 0)
-                            done = status.get("processed_chunks", 0)
-                            pct = int(done/total*100) if total else 0
-                            progress.progress(min(pct, 100))
-                            status_text.text(f"{done}/{total} chunks processed")
-                            if status.get("status") in ("success","failed"): break
-                        if status.get("status") == "success":
+                            job_status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
+                            total = job_status.get("total_chunks", 0)
+                            done = job_status.get("processed_chunks", 0)
+                            total_docs = job_status.get("total_documents", 0)
+                            done_docs = job_status.get("processed_documents", 0)
+                            documents = job_status.get("documents", [])
+                            
+                            # Update overall progress - use document completion primarily
+                            if total_docs > 0:
+                                # Calculate progress based on document completion + chunk progress within current documents
+                                doc_completion_pct = (done_docs / total_docs) * 80  # 80% weight for completed docs
+                                
+                                # Add partial progress for documents currently being processed
+                                current_doc_progress = 0
+                                processing_docs = [d for d in documents if d["status"] == "processing"]
+                                if processing_docs and total_docs > done_docs:
+                                    # Average progress of currently processing documents
+                                    avg_current_progress = sum(
+                                        (d["chunks_processed"] / max(d["chunks_total"], 1)) * 100 
+                                        for d in processing_docs
+                                    ) / len(processing_docs)
+                                    current_doc_progress = (avg_current_progress / 100) * (20 / total_docs)  # 20% weight distributed
+                                
+                                overall_pct = min(int(doc_completion_pct + current_doc_progress), 100)
+                            else:
+                                overall_pct = int(done/total*100) if total else 0
+                            
+                            overall_progress.progress(overall_pct)
+                            
+                            # Enhanced status text
+                            if total_docs > 0:
+                                status_summary = []
+                                pending_count = len([d for d in documents if d["status"] == "pending"])
+                                processing_count = len([d for d in documents if d["status"] == "processing"])
+                                completed_count = len([d for d in documents if d["status"] == "completed"])
+                                failed_count = len([d for d in documents if d["status"] == "failed"])
+                                
+                                if pending_count > 0:
+                                    status_summary.append(f"{pending_count} pending")
+                                if processing_count > 0:
+                                    status_summary.append(f"{processing_count} processing")
+                                if completed_count > 0:
+                                    status_summary.append(f"{completed_count} completed")
+                                if failed_count > 0:
+                                    status_summary.append(f"{failed_count} failed")
+                                
+                                overall_status_text.text(f"Progress: {overall_pct}% | {' | '.join(status_summary)} | Chunks: {done}/{total}")
+                            else:
+                                overall_status_text.text(f"Overall: {done}/{total} chunks processed ({done_docs}/{total_docs} documents)")
+                            
+                            # Update individual document progress
+                            for doc in documents:
+                                doc_idx = doc["index"]
+                                filename = doc["filename"]
+                                doc_status = doc["status"]
+                                chunks_done = doc["chunks_processed"]
+                                chunks_total = doc["chunks_total"]
+                                
+                                if doc_idx not in doc_containers:
+                                    doc_containers[doc_idx] = st.container()
+                                    with doc_containers[doc_idx]:
+                                        st.write(f"**{filename}**")
+                                        doc_progress_bars[doc_idx] = st.progress(0)
+                                        doc_status_texts[doc_idx] = st.empty()
+                                
+                                # Update progress bar
+                                if chunks_total > 0:
+                                    doc_pct = int(chunks_done / chunks_total * 100)
+                                    doc_progress_bars[doc_idx].progress(min(doc_pct, 100))
+                                
+                                # Update status text with appropriate emoji
+                                status_text = {
+                                    "pending": "Pending",
+                                    "processing": "Processing",
+                                    "completed": "Completed!",
+                                    "failed": "FAILED"
+                                }.get(doc_status, "?")
+                                
+                                if doc_status == "failed":
+                                    error_msg = doc.get("error_message", "Unknown error")
+                                    doc_status_texts[doc_idx].text(f"{status_text}: {error_msg}")
+                                else:
+                                    doc_status_texts[doc_idx].text(f"{status_text}: {chunks_done}/{chunks_total} chunks")
+                            
+                            if job_status.get("status") in ("success","failed"): 
+                                # Final update: ensure all progress bars show completion
+                                overall_progress.progress(100)
+                                overall_status_text.text("Processing complete!")
+                                
+                                # Update all document progress bars to 100% on success
+                                if job_status.get("status") == "success":
+                                    for doc in documents:
+                                        doc_idx = doc["index"]
+                                        if doc_idx in doc_progress_bars:
+                                            doc_progress_bars[doc_idx].progress(100)
+                                            doc_status_texts[doc_idx].text("Completed: 100%")
+                                break
+                        
+                        if job_status.get("status") == "success":
                             st.success("File ingestion complete!")
-                            st.json(status)
+                            latest = job_status.get("latest_document_id")
+                            if latest:
+                                st.session_state.latest_doc_id = latest
                             st.session_state['collections'] = utils.get_chromadb_collections()
                         else:
                             st.error("File ingestion failed.")
                     except Exception as e:
                         st.error(f"Upload failed: {e}")
-        
-                    # Poll job status
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    total, processed = 0, 0
-                    while True:
-                        time.sleep(1)
-                        status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
-                        total = status.get("total_chunks", 0)
-                        processed = status.get("processed_chunks", 0)
-                        if total:
-                            pct = int(processed / total * 100)
-                        else:
-                            pct = 0
-                        progress_bar.progress(min(pct, 100))
-                        status_text.text(f"{processed}/{total} chunks processed")
-
-                        if status.get("status") in ("success", "failed"):
-                            break
-
-                    if status.get("status") == "success":
-                        latest = status.get("latest_document_id")
-                        if latest:
-                            st.session_state.latest_doc_id = latest
-                        st.success("Ingestion complete!")
-                        st.session_state['latest_doc_id'] = status.get("latest_document_id", "")
-                        collections = utils.get_chromadb_collections()
-                        st.session_state['collections'] = collections
-                    
-                    else:
-                        st.error("Ingestion failed.")
             if url:
                 payload = {"url": url, "collection_name": target_collection}
                 try:

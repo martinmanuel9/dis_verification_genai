@@ -190,3 +190,4 @@ class CollectionPerformanceRequest(BaseModel):
 class RAGMetricsExportRequest(BaseModel):
     format: str = Field(default="json", description="Export format")
     time_period_hours: int = Field(default=24, ge=1, le=8760, description="Export period in hours")
+

@@ -9,162 +9,203 @@ from components.agent_creator import create_agent_form
 FASTAPI_API = os.getenv("FASTAPI_URL", "http://localhost:9020")
 
 def Document_Generator():
-    st.header("Document Generator")
-    st.info("Upload templates, and generate comprehensive documentation using AI analysis.")
+    st.header("Standards-Requirements Test Plan Generator")
+    st.info("Generate comprehensive standards-requirements test plans directly from your source documents using multi-actor + critic.")
+    st.caption("Mode: Standards-Requirements (source-only)")
+    # Use only the optimized version - remove confusing options
+    strategy = "Optimized Multi-Agent Workflow"
+    st.info("🚀 Using Optimized Multi-Agent Workflow with Redis streaming pipeline for comprehensive test plan generation")
     
-    # Document Generator sub-modes
-    doc_gen_mode = st.radio(
-        "Select Action:",
-        ["Rule Development Agents", "Generate Documents"],
-        horizontal=True
+    st.subheader("Generate Test Plans")
+
+    # Using Test Plan Gen (actor + critic) strategy only
+    supported_models = [
+        "gpt-4", "gpt-3.5-turbo","llama"
+    ]
+    actor_models = st.multiselect(
+        "Actor models (multi)",
+        options=supported_models,
+        default=["gpt-4"],
+        help="Models used in parallel to extract detailed rules",
+        key="gen_actor_models",
     )
-    
-    # ----------------------------------------------------------------------
-    # RULE DEVELOPMENT AGENTS SUB-MODE
-    # ----------------------------------------------------------------------
-    if doc_gen_mode == "Rule Development Agents":
-        # Use the unified agent creation component for rule development agents
-        create_agent_form(
-            template_category="rule_development",
-            key_prefix="doc_gen",
-            form_title="Create Rule Development Agent"
+    critic_model = st.selectbox(
+        "Critic model",
+        options=supported_models,
+        index=0,
+        help="Model used to synthesize and deduplicate the actors' outputs",
+        key="gen_critic_model",
+    )
+
+    # No agents needed for actor + critic workflow
+    agent_ids = []
+
+    # ----------------------------
+    # Select SOURCE documents for test plan generation
+    # ----------------------------
+    source_collection = st.selectbox(
+        "Source Collection (your requirements/standards)",
+        st.session_state.collections,
+        key="gen_source_coll",
+    )
+    if st.button("Load Source Documents", key="gen_load_sources"):
+        st.session_state.source_docs = get_all_documents_in_collection(source_collection)
+
+    source_docs = st.session_state.get("source_docs", [])
+    source_map = {d["document_name"]: d["document_id"] for d in source_docs}
+    selected_sources = st.multiselect(
+        "Select Source Document(s)", list(source_map.keys()), key="gen_sources"
+    )
+    source_doc_ids = [source_map[name] for name in selected_sources]
+
+    # ----------------------------
+    # Output file name
+    # ----------------------------
+    out_name = st.text_input(
+        "Output file name (no extension):",
+        value="Generated_Test_Plan",
+        key="gen_filename"
+    ).strip()
+
+    # Simplified tuning for optimized workflow
+    with st.expander("Advanced tuning", expanded=False):
+        max_actor_workers = st.number_input(
+            "Max workers (parallel processing)", min_value=1, max_value=16, value=4, step=1,
+            help="Number of parallel workers for section processing.",
+            key="sr_max_actor_workers"
         )
-    
-    
-    elif doc_gen_mode == "Generate Documents":
-        st.subheader("Generate Test Plans")
 
-        # ----------------------------
-        # 1) Pick agents
-        # ----------------------------
-        agents = st.session_state.get("available_rule_agents") or requests.get(f"{FASTAPI_API}/get-agents").json()["agents"]
-        # rule_agents = [a for a in agents if "rule" in a["name"].lower()]
-        agent_map = {f"{a['name']} ({a['model_name']})": a["id"] for a in agents}
-        selected_agents = st.multiselect("Select Agents", list(agent_map.keys()), key="gen_agents")
-        if not selected_agents:
-            st.info("Choose at least one agent to proceed"); st.stop()
-
-        # ----------------------------
-        # 2a) Pick TEMPLATE collection & load template docs
-        # ----------------------------
-        template_collection = st.selectbox(
-            "Template Collection (the one you uploaded as templates)",
-            st.session_state.collections,
-            key="gen_template_coll",
+    # Sectioning controls
+    with st.expander("Sectioning", expanded=False):
+        sectioning_strategy = st.selectbox(
+            "Sectioning strategy",
+            options=["auto", "by_chunks", "by_metadata"],
+            index=0,
+            help="How to break the source document(s) into sections for extraction.",
+            key="sr_sectioning_strategy",
         )
-        if st.button("Load Template Library", key="gen_load_templates"):
-            st.session_state.template_docs = get_all_documents_in_collection(template_collection)
-
-        template_docs = st.session_state.get("template_docs", [])
-        template_map = {d["document_name"]: d["document_id"] for d in template_docs}
-        selected_templates = st.multiselect(
-            "Select Template(s)", list(template_map.keys()), key="gen_templates"
+        chunks_per_section = st.number_input(
+            "Chunks per section (by_chunks)", min_value=1, max_value=50, value=15, step=1,
+            help="When using by_chunks, how many vector chunks to group per section. Higher values = more comprehensive sections.",
+            key="sr_chunks_per_section",
         )
-        template_doc_ids = [template_map[name] for name in selected_templates]
 
-        # ----------------------------
-        # 2b) Pick SOURCE collection & load source docs
-        # ----------------------------
-        source_collection = st.selectbox(
-            "Source Collection (your requirements/standards)",
-            st.session_state.collections,
-            key="gen_source_coll",
-        )
-        if st.button("Load Source Documents", key="gen_load_sources"):
-            st.session_state.source_docs = get_all_documents_in_collection(source_collection)
-
-        source_docs = st.session_state.get("source_docs", [])
-        source_map = {d["document_name"]: d["document_id"] for d in source_docs}
-        selected_sources = st.multiselect(
-            "Select Source Document(s)", list(source_map.keys()), key="gen_sources"
-        )
-        source_doc_ids = [source_map[name] for name in selected_sources]
-
-        # ----------------------------
-        # 3) Pick agents 
-        # ----------------------------
-        agent_ids = [agent_map[label] for label in selected_agents]
-
-        # ----------------------------
-        # 4) Let user name the output file
-        # ----------------------------
-        out_name = st.text_input(
-            "Output file name (no extension):",
-            value="Generated_Test_Plan",
-            key="gen_filename"
-        ).strip()
-
-        # ----------------------------
-        # 5) Generate analyses
-        # ----------------------------
-        if st.button("Generate Documents", type="primary", key="generate_docs_main"):
-            if not template_doc_ids or not source_doc_ids:
-                st.error("You must select at least one templated and one source doc.")
+        if st.button("Preview Sections", key="preview_sections_btn"):
+            if not source_collection:
+                st.warning("Select a source collection first.")
+            elif not source_doc_ids:
+                st.warning("Select at least one source document.")
             else:
-                payload = {
-                    "template_collection": template_collection,
-                    "template_doc_ids":    template_doc_ids,
-                    "source_collections":  [source_collection],
-                    "source_doc_ids":      source_doc_ids,
-                    "agent_ids":           agent_ids,
-                    "use_rag":             True,
-                    "top_k":               5,
-                    "doc_title":           out_name
-                }
-                st.write("about to call /generate_documents on", FASTAPI_API)
-                st.write("Payload:", payload)
-                with st.spinner("Calling Document Generator…"):
+                with st.spinner("Detecting sections…"):
                     try:
-                        resp = requests.post(
-                            f"{FASTAPI_API}/generate_documents",
-                            json=payload
-                            # timeout=300
-                        )
-                        # now resp is guaranteed to exist
-                        if not resp.ok:
-                            st.error(f"Error {resp.status_code}: {resp.text}")
-                        else:
-                            docs = resp.json().get("documents", [])
-                            
-                            if docs:
-                                # Get the first/primary document or combine if multiple
-                                if len(docs) == 1:
-                                    primary_doc = docs[0]
-                                    st.success(f"Generated document: {primary_doc['title']}")
-                                else:
-                                    # Combine multiple documents into one
-                                    st.success(f"Generated and combined {len(docs)} chunks")
-                                    combined_content = []
-                                    combined_title = f"Combined_{out_name}"
-                                    
-                                    for i, doc in enumerate(docs):
-                                        combined_content.append(f"## Document {i+1}: {doc['title']}\n\n{doc.get('content', '')}")
-                                    
-                                    primary_doc = {
-                                        'title': combined_title,
-                                        'content': '\n\n---\n\n'.join(combined_content),
-                                        'docx_b64': docs[0].get('docx_b64', '')  # Use first doc's DOCX as base
-                                    }
-                                
-                                # Provide immediate download
-                                if 'docx_b64' in primary_doc:
-                                    blob = base64.b64decode(primary_doc["docx_b64"])
-                                    st.download_button(
-                                        label=f"Download {primary_doc['title']}.docx",
-                                        data=blob,
-                                        file_name=f"{primary_doc['title']}.docx",
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                        key="immediate_download"
-                                    )
-                                else:
-                                    st.warning("Document generated but DOCX format not available")
+                        payload = {
+                            "source_collections": [source_collection],
+                            "source_doc_ids": source_doc_ids,
+                            "sectioning_strategy": sectioning_strategy,
+                            "chunks_per_section": int(chunks_per_section),
+                        }
+                        resp = requests.post(f"{FASTAPI_API}/preview-sections", json=payload, timeout=120)
+                        if resp.ok:
+                            data = resp.json()
+                            st.success(f"Detected {data.get('count', 0)} sections")
+                            names = data.get("section_names", [])
+                            if names:
+                                st.dataframe({"section": names}, use_container_width=True)
                             else:
-                                st.warning("No documents were generated")
+                                st.info("No section names returned.")
+                        else:
+                            st.error(f"Preview failed: {resp.status_code} {resp.text}")
                     except Exception as e:
-                            st.error("Request exception: " + str(e))
+                        st.error(f"Preview error: {e}")
+
+    # ----------------------------
+    # Generate test plan
+    # ----------------------------
+    if st.button("Generate Test Plan", type="primary", key="generate_docs_main"):
+        if not source_doc_ids:
+            st.error("You must select at least one source document.")
+        else:
+            # Use optimized workflow only
+            payload = {
+                "source_collections": [source_collection],
+                "source_doc_ids": source_doc_ids,
+                "doc_title": out_name or "Comprehensive Test Plan",
+                "max_workers": int(max_actor_workers),
+                "sectioning_strategy": sectioning_strategy,
+                "chunks_per_section": int(chunks_per_section),
+            }
+            endpoint = "/generate_optimized_test_plan"
+            st.write("Processing with optimized Redis streaming pipeline...")
+            
+            st.write("Payload:", payload)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            with st.spinner("Generating Test Plan…"):
+                try:
+                    status_text.text("Starting document generation...")
+                    progress_bar.progress(10)
+                    resp = requests.post(f"{FASTAPI_API}{endpoint}", json=payload)
+                    progress_bar.progress(100)
+                    status_text.text("Document generation completed!")
+                    # now resp is guaranteed to exist
+                    if not resp.ok:
+                        st.error(f"Error {resp.status_code}: {resp.text}")
+                    else:
+                        docs = resp.json().get("documents", [])
+                        if docs:
+                            primary_doc = docs[0]
+                            if 'docx_b64' in primary_doc:
+                                blob = base64.b64decode(primary_doc["docx_b64"])
+                                title = primary_doc.get("title", out_name or "Test_Plan")
+                                st.success(f"Generated document: {title}")
+                                st.download_button(
+                                    label=f"Download {title}.docx",
+                                    data=blob,
+                                    file_name=f"{title}.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key="immediate_download"
+                                )
+                                meta = primary_doc.get("meta") or {}
+                                if meta:
+                                    st.caption("Generation summary")
+                                    if strategy == "Optimized Multi-Agent Workflow":
+                                        # Show section-based workflow metrics
+                                        st.write({
+                                            "architecture": meta.get("architecture"),
+                                            "processing_status": primary_doc.get("processing_status", "COMPLETED"),
+                                            "total_sections": meta.get("total_sections"),
+                                            "sections_with_tests": meta.get("sections_with_tests"),
+                                            "total_testable_items": meta.get("total_testable_items"),
+                                            "total_test_procedures": meta.get("total_test_procedures"),
+                                            "section_based": meta.get("section_based"),
+                                            "processing_optimized": meta.get("processing_optimized"),
+                                            "cache_enabled": meta.get("cache_enabled"),
+                                            "max_workers": meta.get("max_workers"),
+                                        })
+                                        
+                                        # Show processing status
+                                        processing_status = primary_doc.get("processing_status", "COMPLETED")
+                                        st.success(f"Test Plan Generation: {processing_status}")
+                                    else:
+                                        # Show original workflow metrics
+                                        st.write({
+                                            "total_chunks": meta.get("total_chunks"),
+                                            "actor_models": meta.get("actor_models"),
+                                            "max_actor_workers": meta.get("max_actor_workers"),
+                                            "critic_model": meta.get("critic_model"),
+                                            "critic_batch_size": meta.get("critic_batch_size"),
+                                            "critic_batch_char_cap": meta.get("critic_batch_char_cap"),
+                                            "batches": meta.get("batches"),
+                                            "batch_sizes": meta.get("batch_sizes"),
+                                            "batch_char_lengths": meta.get("batch_char_lengths"),
+                                        })
+                            else:
+                                st.warning("Document generated but DOCX format not available")
+                        else:
+                            st.warning("No documents were generated")
+                except Exception as e:
+                    st.error("Request exception: " + str(e))
 
         # Simple info section
         st.markdown("---")
-        st.info("**Tip**: After clicking 'Generate Documents', your document will be created and ready for immediate download!")
-
-
+        st.info("**Tip**: After clicking 'Generate Test Plan', your document will be created and ready for immediate download!")

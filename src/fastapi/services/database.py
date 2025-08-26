@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Index
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey,
-    Text, Float, Boolean, JSON, Enum
+    Text, Float, Boolean, JSON, Enum, text
 )
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
@@ -93,18 +93,46 @@ def get_database_url() -> str:
 
 DATABASE_URL = get_database_url()
 
-for i in range(5):
+# Enhanced connection configuration with pooling and optimized retry logic
+engine_config = {
+    'pool_size': 20,          # Increased from default 5
+    'max_overflow': 30,       # Allow burst connections
+    'pool_timeout': 10,       # Reduced from 30 seconds
+    'pool_recycle': 3600,     # Recycle connections after 1 hour
+    'pool_pre_ping': True,    # Verify connections before use
+    'echo': False,            # Disable query logging for performance
+}
+
+# Optimized retry logic with exponential backoff
+retry_delays = [1, 2, 3, 5, 8]  # Reduced from 5-second fixed delay
+for i, delay in enumerate(retry_delays):
     try:
-        engine = create_engine(DATABASE_URL)
-        engine.connect().close()
+        engine = create_engine(DATABASE_URL, **engine_config)
+        # Test connection with shorter timeout
+        conn = engine.connect()
+        conn.execute(text("SELECT 1"))  # Simple health check
+        conn.close()
+        print(f"Database connection established successfully on attempt {i+1}")
         break
-    except OperationalError:
-        print(f"Database not ready, retrying {i+1}/5...")
-        time.sleep(5)
+    except OperationalError as e:
+        print(f"Database not ready (attempt {i+1}/{len(retry_delays)}): {e}")
+        if i < len(retry_delays) - 1:  # Don't sleep on last attempt
+            print(f"Retrying in {delay} seconds...")
+            time.sleep(delay)
 else:
-    raise Exception("Could not connect to the database after 5 attempts")
+    raise Exception(f"Could not connect to the database after {len(retry_delays)} attempts")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Add connection health check function
+def get_database_health():
+    """Check database connection health"""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1"))
+            return {"status": "healthy", "connection_pool": engine.pool.status()}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
 Base = declarative_base()
 
 # Tables
@@ -153,6 +181,7 @@ class ComplianceAgent(Base):
     chain_type = Column(String, default='basic')
     memory_enabled = Column(Boolean, default=False)
     tools_enabled = Column(JSON)
+
 
 class ComplianceSequence(Base):
     __tablename__ = "compliance_sequence"
@@ -290,30 +319,30 @@ def get_db():
         db.close()
 
 def update_agent_performance(agent_id: int, response_time_ms: int, success: bool = True):
-    db = SessionLocal()
+    """Update agent performance metrics with optimized database access"""
     try:
-        agent = db.query(ComplianceAgent).filter(ComplianceAgent.id == agent_id).first()
-        if agent:
-            agent.total_queries = (agent.total_queries or 0) + 1
-            
-            if agent.avg_response_time_ms is None:
-                agent.avg_response_time_ms = response_time_ms
-            else:
-                total_time = agent.avg_response_time_ms * (agent.total_queries - 1) + response_time_ms
-                agent.avg_response_time_ms = total_time / agent.total_queries
+        with SessionLocal() as db:  # Use context manager
+            agent = db.query(ComplianceAgent).filter(ComplianceAgent.id == agent_id).first()
+            if agent:
+                agent.total_queries = (agent.total_queries or 0) + 1
+                
+                if agent.avg_response_time_ms is None:
+                    agent.avg_response_time_ms = response_time_ms
+                else:
+                    total_time = agent.avg_response_time_ms * (agent.total_queries - 1) + response_time_ms
+                    agent.avg_response_time_ms = total_time / agent.total_queries
 
-            if agent.success_rate is None:
-                agent.success_rate = 1.0 if success else 0.0
-            else:
-                total_successes = agent.success_rate * (agent.total_queries - 1) + (1 if success else 0)
-                agent.success_rate = total_successes / agent.total_queries
+                if agent.success_rate is None:
+                    agent.success_rate = 1.0 if success else 0.0
+                else:
+                    total_successes = agent.success_rate * (agent.total_queries - 1) + (1 if success else 0)
+                    agent.success_rate = total_successes / agent.total_queries
 
-            db.commit()
+                db.commit()
+                print(f"Updated performance for agent {agent_id}: queries={agent.total_queries}, avg_time={agent.avg_response_time_ms:.1f}ms")
     except Exception as e:
-        print(f"Performance update error: {e}")
-        db.rollback()
-    finally:
-        db.close()
+        print(f"Performance update error for agent {agent_id}: {e}")
+        # No need for explicit rollback with context manager
 
 
 def log_compliance_result(agent_id: int, data_sample: str,

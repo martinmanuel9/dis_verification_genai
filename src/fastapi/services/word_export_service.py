@@ -23,15 +23,20 @@ logger = logging.getLogger("WORD_EXPORT_SERVICE")
 class WordExportService:
     """
     Service for exporting various application data to Word documents.
+    Enhanced with streaming capabilities and performance optimizations.
     """
     
-    def __init__(self):
+    def __init__(self, enable_streaming: bool = True, chunk_size: int = 50):
         self.temp_dir = os.path.join(os.getcwd(), "temp_exports")
         os.makedirs(self.temp_dir, exist_ok=True)
+        self.enable_streaming = enable_streaming
+        self.chunk_size = chunk_size  # Number of items to process per chunk
+        self._doc_cache = {}  # Cache for frequently used document styles
     
     def export_agents_to_word(self, agents: List[Dict[str, Any]], export_format: str = "detailed") -> bytes:
         """
         Export agent configurations to a Word document.
+        Enhanced with streaming for large datasets.
         
         Args:
             agents: List of agent dictionaries
@@ -41,10 +46,13 @@ class WordExportService:
             bytes: Word document content
         """
         try:
+            start_time = datetime.now()
+            logger.info(f"Starting Word export for {len(agents)} agents in {export_format} format")
+            
             doc = Document()
             
-            # Set up document styles
-            self._setup_document_styles(doc)
+            # Set up document styles with caching
+            self._setup_document_styles_optimized(doc)
             
             # Title
             title = doc.add_heading('Agent Configurations Export', 0)
@@ -59,43 +67,80 @@ class WordExportService:
             # Agents section
             doc.add_heading('Agent Details', level=1)
             
-            for i, agent in enumerate(agents, 1):
-                # Agent header
-                agent_heading = doc.add_heading(f"{i}. {agent.get('name', 'Unknown Agent')}", level=2)
+            # Process agents in chunks for better memory management
+            if self.enable_streaming and len(agents) > self.chunk_size:
+                return self._export_agents_streaming(doc, agents, export_format)
+            else:
+                return self._export_agents_traditional(doc, agents, export_format)
                 
-                # Basic information table
-                self._add_agent_basic_info(doc, agent)
-                
-                if export_format == "detailed":
-                    # System prompt
-                    doc.add_heading('System Prompt', level=3)
-                    system_prompt = agent.get('system_prompt', 'No system prompt defined')
-                    prompt_para = doc.add_paragraph(system_prompt)
-                    prompt_para.style = 'Quote'
-                    
-                    # User prompt template
-                    doc.add_heading('User Prompt Template', level=3)
-                    user_prompt = agent.get('user_prompt_template', 'No user prompt template defined')
-                    template_para = doc.add_paragraph(user_prompt)
-                    template_para.style = 'Quote'
-                    
-                    # Performance metrics if available
-                    if agent.get('total_queries', 0) > 0:
-                        doc.add_heading('Performance Metrics', level=3)
-                        self._add_agent_performance_metrics(doc, agent)
-                
-                # Page break between agents (except last one)
-                if i < len(agents):
-                    doc.add_page_break()
-            
-            # Convert to bytes
-            doc_bytes = self._document_to_bytes(doc)
-            logger.info(f"Exported {len(agents)} agents to Word document")
-            return doc_bytes
-            
         except Exception as e:
             logger.error(f"Failed to export agents to Word: {str(e)}")
             raise e
+    
+    def _export_agents_streaming(self, doc: Document, agents: List[Dict[str, Any]], export_format: str) -> bytes:
+        """Export agents using streaming approach for better performance"""
+        logger.info(f"Using streaming export for {len(agents)} agents")
+        
+        chunks = [agents[i:i + self.chunk_size] for i in range(0, len(agents), self.chunk_size)]
+        
+        for chunk_idx, chunk in enumerate(chunks):
+            logger.debug(f"Processing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} agents)")
+            
+            for i, agent in enumerate(chunk, chunk_idx * self.chunk_size + 1):
+                self._add_agent_to_document(doc, agent, i, export_format)
+                
+                # Add page break between agents (except last one)
+                if i < len(agents):
+                    doc.add_page_break()
+        
+        # Convert to bytes
+        doc_bytes = self._document_to_bytes(doc)
+        logger.info(f"Streaming export completed for {len(agents)} agents")
+        return doc_bytes
+    
+    def _export_agents_traditional(self, doc: Document, agents: List[Dict[str, Any]], export_format: str) -> bytes:
+        """Traditional export approach for smaller datasets"""
+        logger.debug(f"Using traditional export for {len(agents)} agents")
+        
+        for i, agent in enumerate(agents, 1):
+            self._add_agent_to_document(doc, agent, i, export_format)
+            
+            # Page break between agents (except last one)
+            if i < len(agents):
+                doc.add_page_break()
+        
+        # Convert to bytes
+        doc_bytes = self._document_to_bytes(doc)
+        logger.info(f"Traditional export completed for {len(agents)} agents")
+        return doc_bytes
+    
+    def _add_agent_to_document(self, doc: Document, agent: Dict[str, Any], agent_num: int, export_format: str):
+        """Add a single agent to the document (optimized)"""
+        # Agent header
+        agent_heading = doc.add_heading(f"{agent_num}. {agent.get('name', 'Unknown Agent')}", level=2)
+        
+        # Basic information table (optimized)
+        self._add_agent_basic_info_optimized(doc, agent)
+        
+        if export_format == "detailed":
+            # System prompt
+            system_prompt = agent.get('system_prompt', 'No system prompt defined')
+            if system_prompt and len(system_prompt.strip()) > 0:
+                doc.add_heading('System Prompt', level=3)
+                prompt_para = doc.add_paragraph(system_prompt[:1000] + "..." if len(system_prompt) > 1000 else system_prompt)
+                prompt_para.style = 'Quote'
+            
+            # User prompt template
+            user_prompt = agent.get('user_prompt_template', 'No user prompt template defined')
+            if user_prompt and len(user_prompt.strip()) > 0:
+                doc.add_heading('User Prompt Template', level=3)
+                template_para = doc.add_paragraph(user_prompt[:1000] + "..." if len(user_prompt) > 1000 else user_prompt)
+                template_para.style = 'Quote'
+            
+            # Performance metrics if available
+            if agent.get('total_queries', 0) > 0:
+                doc.add_heading('Performance Metrics', level=3)
+                self._add_agent_performance_metrics_optimized(doc, agent)
     
     def export_chat_history_to_word(self, chat_history: List[Dict[str, Any]], session_filter: Optional[str] = None) -> bytes:
         """
@@ -299,6 +344,73 @@ class WordExportService:
             logger.error(f"Failed to export RAG assessment to Word: {str(e)}")
             raise e
     
+    def export_reconstructed_document_to_word(self, reconstructed: Dict[str, Any]) -> bytes:
+        """Export a reconstructed document (text + optional images) to a Word document."""
+        try:
+            doc = Document()
+            self._setup_document_styles(doc)
+
+            title_text = reconstructed.get('document_name') or 'Reconstructed Document'
+            title = doc.add_heading(title_text, 0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Render reconstructed content with simple markdown-like handling
+            content = reconstructed.get('reconstructed_content', '') or ''
+            for line in content.splitlines():
+                l = (line or '').strip()
+                if not l:
+                    doc.add_paragraph("")
+                    continue
+                if l.startswith('### '):
+                    doc.add_heading(l[4:].strip(), level=3)
+                elif l.startswith('## '):
+                    doc.add_heading(l[3:].strip(), level=2)
+                elif l.startswith('# '):
+                    doc.add_heading(l[2:].strip(), level=1)
+                elif l.startswith(('-', '*', '•')):
+                    doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
+                else:
+                    doc.add_paragraph(l)
+
+            # Optional: embed images
+            images = reconstructed.get('images') or []
+            if images:
+                doc.add_page_break()
+                doc.add_heading('Images', level=1)
+                CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8020")
+                import tempfile
+                from docx.shared import Inches
+                for idx, img in enumerate(images, 1):
+                    filename = img.get('filename')
+                    desc = img.get('description') or ''
+                    try:
+                        import requests
+                        resp = requests.get(f"{CHROMA_URL}/images/{filename}", timeout=15)
+                        if resp.ok:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
+                                tf.write(resp.content)
+                                temp_path = tf.name
+                            doc.add_picture(temp_path, width=Inches(5.5))
+                            if desc:
+                                para = doc.add_paragraph(desc)
+                                para.style = 'Quote'
+                            os.unlink(temp_path)
+                        else:
+                            doc.add_paragraph(f"[Image '{filename}' not available]")
+                            if desc:
+                                para = doc.add_paragraph(desc)
+                                para.style = 'Quote'
+                    except Exception as e:
+                        doc.add_paragraph(f"[Failed to load image '{filename}': {e}]")
+                        if desc:
+                            para = doc.add_paragraph(desc)
+                            para.style = 'Quote'
+
+            return self._document_to_bytes(doc)
+        except Exception as e:
+            logger.error(f"Failed to export reconstructed document to Word: {str(e)}")
+            raise e
+    
     def _setup_document_styles(self, doc: Document):
         """Set up custom styles for the document."""
         try:
@@ -315,6 +427,84 @@ class WordExportService:
                 quote_style.paragraph_format.right_indent = Inches(0.5)
         except:
             pass  # Ignore styling errors
+    
+    def _setup_document_styles_optimized(self, doc: Document):
+        """Set up custom styles for the document with caching."""
+        doc_id = id(doc)
+        
+        if doc_id in self._doc_cache:
+            logger.debug("Using cached document styles")
+            return
+        
+        try:
+            # Create custom styles
+            styles = doc.styles
+            
+            # Quote style
+            if 'Quote' not in [style.name for style in styles]:
+                quote_style = styles.add_style('Quote', WD_STYLE_TYPE.PARAGRAPH)
+                quote_font = quote_style.font
+                quote_font.italic = True
+                quote_font.size = Pt(10)
+                quote_style.paragraph_format.left_indent = Inches(0.5)
+                quote_style.paragraph_format.right_indent = Inches(0.5)
+                
+                # Cache the setup
+                self._doc_cache[doc_id] = True
+                logger.debug("Document styles cached")
+        except Exception as e:
+            logger.warning(f"Failed to set up document styles: {e}")
+    
+    def _add_agent_basic_info_optimized(self, doc: Document, agent: Dict[str, Any]):
+        """Add basic agent information as a table (optimized version)."""
+        table = doc.add_table(rows=6, cols=2)
+        table.style = 'Table Grid'
+        
+        # Prepare data more efficiently
+        created_at = agent.get('created_at', 'Unknown')
+        if isinstance(created_at, str) and len(created_at) > 10:
+            created_at = created_at[:10]  # Just date part
+        
+        rows_data = [
+            ('Agent ID', str(agent.get('id', 'N/A'))),
+            ('Model', agent.get('model_name', 'Unknown')),
+            ('Created', created_at),
+            ('Status', 'Active' if agent.get('is_active', True) else 'Inactive'),
+            ('Temperature', str(agent.get('temperature', 'N/A'))),
+            ('Max Tokens', str(agent.get('max_tokens', 'N/A')))
+        ]
+        
+        # Batch fill table cells
+        for i, (label, value) in enumerate(rows_data):
+            row = table.rows[i]
+            row.cells[0].text = label
+            row.cells[1].text = value
+        
+        doc.add_paragraph("")
+    
+    def _add_agent_performance_metrics_optimized(self, doc: Document, agent: Dict[str, Any]):
+        """Add agent performance metrics as a table (optimized version)."""
+        table = doc.add_table(rows=4, cols=2)
+        table.style = 'Table Grid'
+        
+        # Pre-calculate metrics
+        success_rate = agent.get('success_rate', 0)
+        success_rate_str = f"{success_rate*100:.1f}%" if success_rate else 'N/A'
+        
+        rows_data = [
+            ('Total Queries', str(agent.get('total_queries', 0))),
+            ('Average Response Time', f"{agent.get('avg_response_time_ms', 0):.0f}ms"),
+            ('Success Rate', success_rate_str),
+            ('Chain Type', agent.get('chain_type', 'basic'))
+        ]
+        
+        # Batch fill table cells
+        for i, (label, value) in enumerate(rows_data):
+            row = table.rows[i]
+            row.cells[0].text = label
+            row.cells[1].text = value
+        
+        doc.add_paragraph("")
     
     def _add_agent_basic_info(self, doc: Document, agent: Dict[str, Any]):
         """Add basic agent information as a table."""

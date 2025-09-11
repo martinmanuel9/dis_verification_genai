@@ -410,6 +410,52 @@ class WordExportService:
         except Exception as e:
             logger.error(f"Failed to export reconstructed document to Word: {str(e)}")
             raise e
+
+    def export_markdown_to_word(self, title: str, markdown_content: str) -> bytes:
+        """Export generic markdown-like content to a Word document."""
+        try:
+            doc = Document()
+            self._setup_document_styles(doc)
+
+            # Title
+            if title:
+                t = doc.add_heading(title, 0)
+                t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Basic markdown handling
+            for line in (markdown_content or '').splitlines():
+                l = (line or '').strip()
+                if not l:
+                    doc.add_paragraph("")
+                    continue
+                if l.startswith('### '):
+                    doc.add_heading(l[4:].strip(), level=3)
+                elif l.startswith('## '):
+                    doc.add_heading(l[3:].strip(), level=2)
+                elif l.startswith('# '):
+                    doc.add_heading(l[2:].strip(), level=1)
+                elif l.startswith(('-', '*', '•')):
+                    doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
+                elif l[:2].isdigit() and len(l) > 2 and l[2] in ('.', ')'):
+                    doc.add_paragraph(l, style='List Number')
+                else:
+                    # Handle inline bold via **text**
+                    if '**' in l:
+                        parts = l.split('**')
+                        p = doc.add_paragraph()
+                        bold = False
+                        for part in parts:
+                            run = p.add_run(part)
+                            if bold:
+                                run.bold = True
+                            bold = not bold
+                    else:
+                        doc.add_paragraph(l)
+
+            return self._document_to_bytes(doc)
+        except Exception as e:
+            logger.error(f"Failed to export markdown to Word: {str(e)}")
+            raise e
     
     def _setup_document_styles(self, doc: Document):
         """Set up custom styles for the document."""

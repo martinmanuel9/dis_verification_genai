@@ -27,7 +27,7 @@ def Healthcheck_Sidebar():
         if st.button("Check Health"):
             try:
                 with st.spinner("Checking health..."):
-                    response = requests.get(HEALTH_ENDPOINT, timeout=10)
+                    response = requests.get(HEALTH_ENDPOINT, timeout=60)
                     if response.ok:
                         st.session_state.health_status = response.json()
                         st.success("Online")
@@ -39,7 +39,35 @@ def Healthcheck_Sidebar():
         # Display cached health status
         if st.session_state.health_status:
             with st.expander("System Details"):
-                st.json(st.session_state.health_status)
+                hs = st.session_state.health_status
+                st.json(hs)
+                # Ollama quick view
+                if isinstance(hs, dict) and 'ollama' in hs:
+                    o = hs['ollama'] or {}
+                    st.markdown("---")
+                    st.subheader("Ollama Models")
+                    st.caption(f"Status: {o.get('status')} | Host: {o.get('base_url')}")
+                    st.write("Available:")
+                    st.code("\n".join(o.get('available_models', [])) or "(none)")
+                    st.write("Resolved (UI → Tag):")
+                    resolved = o.get('resolved', {})
+                    for k, v in (resolved.items() if isinstance(resolved, dict) else []):
+                        st.text(f"{k} → {v}")
+                    missing = o.get('missing', [])
+                    if missing:
+                        st.warning(f"Missing tags: {missing}")
+                        if st.button("Pull Missing Models", key="pull_missing_models"):
+                            try:
+                                with st.spinner("Pulling models..."):
+                                    r = requests.post(f"{FASTAPI_API}/ollama/pull-required", timeout=300)
+                                if r.ok:
+                                    res = r.json()
+                                    st.success("Pull completed")
+                                    st.json(res)
+                                else:
+                                    st.error(f"Pull failed: {r.status_code} {r.text}")
+                            except Exception as e:
+                                st.error(f"Pull error: {e}")
 
         st.header("Collections")
         

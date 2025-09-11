@@ -26,14 +26,16 @@ OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
 # Model configurations
 model_key_map = {
     "GPT-4": "gpt-4",
-    "GPT-3.5-Turbo": "gpt-3.5-turbo", 
-    "LLaMA 3": "llama3",
+    "GPT-3.5-Turbo": "gpt-3.5-turbo",
+    "GPT-OSS": "gpt-oss",
+    "LLaMA": "llama",  # single canonical LLaMA mapped to llama3.1:8b by backend
 }
 
 model_descriptions = {
-    "GPT-4": "Most capable model for complex analysis",
-    "GPT-3.5-Turbo": "Cost-effective model for general tasks",
-    "LLaMA 3": "Fast and efficient general-purpose model",
+    "gpt-4": "Most capable model for complex analysis",
+    "gpt-3.5-turbo": "Cost-effective model for general tasks",
+    "gpt-oss": "OpenAI OSS endpoints (uses OAI_OSS_MODEL)",
+    "llama": "LLaMA via Ollama (defaults to llama3.1:8b)",
 }
 
 # Load Sentence Transformer model
@@ -197,7 +199,8 @@ def get_available_models():
                 return [model for model, status in health_data["models"].items() if "available" in status.lower()]
     except Exception as e:
         print(f"Error fetching models: {e}")
-    return ["gpt-4", "gpt-3.5-turbo", "llama3"]
+    # Fallback list if health endpoint not available
+    return ["gpt-4", "gpt-3.5-turbo", "gpt-oss", "llama"]
 
 
 @st.cache_data(ttl=300)

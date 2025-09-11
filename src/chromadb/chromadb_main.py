@@ -30,7 +30,14 @@ from sentence_transformers import SentenceTransformer
 from PIL import Image
 
 
+# Ensure env is loaded early
 load_dotenv()
+
+# Hard-disable Chroma/PostHog telemetry to avoid noisy capture errors in logs
+# This is defensive in addition to Settings(anonymized_telemetry=False)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY_ENABLED", "false")
+os.environ.setdefault("POSTHOG_DISABLED", "1")
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1572,8 +1579,15 @@ def health_check():
 @app.get("/collections")
 def list_collections():
     try:
-        collection_names = chroma_client.list_collections()  # Now returns just names
-        return {"collections": collection_names}
+        cols = chroma_client.list_collections()
+        # Normalize to list[str] of names regardless of client return type
+        names = []
+        for c in cols:
+            try:
+                names.append(c if isinstance(c, str) else getattr(c, "name", str(c)))
+            except Exception:
+                continue
+        return {"collections": names}
     except Exception as e:
         logger.error(f"Error listing collections: {e}")
         raise HTTPException(status_code=500, detail="Failed to list collections")
@@ -1586,8 +1600,10 @@ def create_collection(collection_name: str = Query(...)):
     """
     try:
         # Get existing collection names safely
-        existing_names = chroma_client.list_collections()
-        
+        existing_objs = chroma_client.list_collections()
+        existing_names = [c if isinstance(c, str) else getattr(c, "name", None) for c in existing_objs]
+        existing_names = [n for n in existing_names if n]
+
         if collection_name in existing_names:
             raise HTTPException(
                 status_code=400,
@@ -1713,8 +1729,10 @@ class DocumentAddRequest(BaseModel):
 def add_documents(req: DocumentAddRequest):
     try:
         # Check if the collection exists
-        existing_names = chroma_client.list_collections()
-                
+        existing_objs = chroma_client.list_collections()
+        existing_names = [c if isinstance(c, str) else getattr(c, "name", None) for c in existing_objs]
+        existing_names = [n for n in existing_names if n]
+
         if req.collection_name not in existing_names:
             raise HTTPException(
                 status_code=404,
@@ -1754,8 +1772,10 @@ def remove_documents(req: DocumentRemoveRequest):
     """
     try:
         # Check if the collection exists first
-        existing_names = chroma_client.list_collections()
-                
+        existing_objs = chroma_client.list_collections()
+        existing_names = [c if isinstance(c, str) else getattr(c, "name", None) for c in existing_objs]
+        existing_names = [n for n in existing_names if n]
+
         if req.collection_name not in existing_names:
             raise HTTPException(
                 status_code=404,
@@ -1765,22 +1785,20 @@ def remove_documents(req: DocumentRemoveRequest):
         # Now, safely retrieve the collection (since we verified it exists)
         collection = chroma_client.get_collection(req.collection_name)
 
-        # Ensure at least one of the documents exists before attempting to delete
+        # Determine which of the requested IDs exist
         existing_docs = collection.get()
-        existing_ids = set(existing_docs.get("ids", []))
+        existing_ids = set(existing_docs.get("ids", []) or [])
+        to_remove = [doc_id for doc_id in req.ids if doc_id in existing_ids]
 
-        if not any(doc_id in existing_ids for doc_id in req.ids):
-            raise HTTPException(
-                status_code=404,
-                detail=f"None of the provided document IDs {req.ids} exist in collection '{req.collection_name}'."
-            )
-
-        # Delete the specified document(s)
-        collection.delete(ids=req.ids)
+        removed_ids = []
+        if to_remove:
+            collection.delete(ids=to_remove)
+            removed_ids = to_remove
         
         return {
             "collection": req.collection_name,
-            "removed_ids": req.ids
+            "removed_ids": removed_ids,
+            "requested_ids": req.ids
         }
     except HTTPException:
         raise

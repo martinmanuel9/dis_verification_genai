@@ -37,6 +37,7 @@ from langchain_core.messages import HumanMessage
 from starlette.concurrency import run_in_threadpool
 import base64
 import redis
+import requests
 
 
 import logging
@@ -56,6 +57,58 @@ def get_db():
         yield db
     finally:
         db.close()
+
+@router.post("/ollama/pull-required")
+async def ollama_pull_required():
+    """
+    Pull required Ollama models (llama3, llama3.1, llama2) based on current resolver mapping.
+    Safe to call from the Healthcheck UI to prefetch missing tags without blocking /health.
+    """
+    try:
+        from services.llm_utils import _resolve_ollama_model
+        base = os.getenv("LLM_OLLAMA_HOST", "http://ollama:11434").rstrip("/")
+        required = [ _resolve_ollama_model("llama", base) ]
+        # Fetch available tags
+        avail = []
+        try:
+            r = requests.get(f"{base}/api/tags", timeout=5)
+            if r.ok:
+                data = r.json() or {}
+                avail = [m.get("name", "") for m in data.get("models", [])]
+        except Exception:
+            pass
+        avail_l = [a.lower() for a in avail]
+
+        pulls = []
+        for tag in required:
+            if isinstance(tag, str) and tag.lower() not in avail_l:
+                try:
+                    pr = requests.post(f"{base}/api/pull", json={"name": tag}, timeout=180)
+                    if pr.ok:
+                        pulls.append({"tag": tag, "status": "pulled"})
+                    else:
+                        pulls.append({"tag": tag, "status": f"error:{pr.status_code}", "detail": pr.text[:200]})
+                except Exception as e:
+                    pulls.append({"tag": tag, "status": f"exception:{str(e)}"})
+
+        # Refresh models
+        new_avail = avail
+        try:
+            r2 = requests.get(f"{base}/api/tags", timeout=5)
+            if r2.ok:
+                data2 = r2.json() or {}
+                new_avail = [m.get("name", "") for m in data2.get("models", [])]
+        except Exception:
+            pass
+        return {
+            "base_url": base,
+            "required": required,
+            "pulls": pulls,
+            "available_models": new_avail,
+        }
+    except Exception as e:
+        logger.error(f"Ollama pull-required failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class ChatRequest(BaseModel):
     query: str
@@ -174,34 +227,7 @@ async def compliance_check(request: ComplianceCheckRequest, db: Session = Depend
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/generated-testplans")
-async def list_generated_testplans(limit: int = Query(20, ge=1, le=200)):
-    """List recent test plan runs indexed in Redis with basic metadata"""
-    try:
-        rhost = os.getenv("REDIS_HOST", "redis")
-        rport = int(os.getenv("REDIS_PORT", 6379))
-        rcli = redis.Redis(host=rhost, port=rport, decode_responses=True)
-        ids = rcli.zrevrange("doc:recent", 0, limit - 1) or []
-        results = []
-        for doc_id in ids:
-            meta = rcli.hgetall(f"doc:{doc_id}:meta") or {}
-            section_count = rcli.scard(f"doc:{doc_id}:sections")
-            results.append({
-                "redis_document_id": doc_id,
-                "title": meta.get("title", "Comprehensive Test Plan"),
-                "collection": meta.get("collection"),
-                "created_at": meta.get("created_at"),
-                "completed_at": meta.get("completed_at"),
-                "status": meta.get("status", "UNKNOWN"),
-                "section_count": int(section_count) if section_count is not None else None,
-                "total_testable_items": int(meta.get("total_testable_items", "0") or 0),
-                "total_test_procedures": int(meta.get("total_test_procedures", "0") or 0),
-                "generated_document_id": meta.get("generated_document_id")
-            })
-        return {"count": len(results), "runs": results}
-    except Exception as e:
-        logger.error(f"Failed to list generated test plans: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+## Removed legacy generated-testplans listing endpoint
 
 @router.post("/rag-check")
 async def rag_check(request: RAGCheckRequest, db: Session = Depends(get_db)):
@@ -834,64 +860,89 @@ class GenerateRequest(BaseModel):
     sectioning_strategy:  Optional[str]         = "auto"   # auto | by_chunks | by_metadata | by_pages
     chunks_per_section:   Optional[int]         = 5
 
-@router.post("/generate_documents")
-async def generate_documents(req: GenerateRequest):
-    logger.info("Received /generate_documents ⇒ %s", req)
-    docs = await run_in_threadpool(
-        doc_service.generate_documents,
-        req.source_collections,
-        req.source_doc_ids,
-        req.use_rag,
-        req.top_k,
-        req.doc_title,
-        req.pairwise_merge,
-        req.actor_models,
-        req.critic_model,
-        req.coverage_strategy,
-        req.max_actor_workers,
-        req.critic_batch_size,
-        req.critic_batch_char_cap,
-        req.sectioning_strategy,
-        req.chunks_per_section
-    )
-    return {"documents": docs}
-
-class OptimizedTestPlanRequest(BaseModel):
-    source_collections:   Optional[List[str]]   = None
-    source_doc_ids:       Optional[List[str]]   = None
-    doc_title:            Optional[str]         = "Comprehensive Test Plan"
-    max_workers:          Optional[int]         = 4
-    sectioning_strategy:  Optional[str]         = "auto"
-    chunks_per_section:   Optional[int]         = 5
-
-@router.post("/generate_optimized_test_plan")
-async def generate_optimized_test_plan(req: OptimizedTestPlanRequest):
+class DocumentGenerationRequest(BaseModel):
+    source_collections:     Optional[List[str]]   = None
+    source_doc_ids:         Optional[List[str]]   = None
+    doc_title:              Optional[str]         = "Generated Document"
+    sectioning_strategy:    Optional[str]         = "smart"
+    chunks_per_section:     Optional[int]         = 5
+    use_direct_processing:  Optional[bool]        = None
+    max_workers:            Optional[int]         = 4
+    
+@router.post("/generate")
+async def generate_document(req: DocumentGenerationRequest):
     """
-    Generate test plan using the new optimized multi-agent workflow:
-    1. Extract rules/requirements per section with caching
-    2. Generate test steps per section
-    3. Consolidate into comprehensive test plan
-    4. Critic review and approval
-    5. O(log n) performance optimization
+    Unified document generation endpoint:
+    - Auto-selects optimal processing method (direct vs pipeline)
+    - Supports test plans, compliance documents, and other formats
+    - Intelligent sectioning with smart defaults
     """
-    logger.info("Received /generate_optimized_test_plan ⇒ %s", req)
+    logger.info("Received /generate ⇒ %s", req)
     
     try:
         docs = await run_in_threadpool(
-            doc_service.generate_optimized_test_plan,
+            doc_service.generate_test_plan,
             req.source_collections,
             req.source_doc_ids,
             req.doc_title,
-            req.max_workers,
-            req.sectioning_strategy,
-            req.chunks_per_section
+            req.use_direct_processing
         )
         return {"documents": docs}
     except Exception as e:
-        logger.error(f"Error in optimized test plan generation: {e}")
-        raise HTTPException(status_code=500, detail=f"Test plan generation failed: {str(e)}")
+        logger.error(f"Error in document generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Document generation failed: {str(e)}")
 
-# Note: MIL-style generation is handled via /generate_documents in generate_docs_service
+# Legacy endpoint redirects
+@router.post("/generate_documents")
+async def generate_documents_legacy(req: GenerateRequest):
+    """Legacy endpoint - redirects to /generate"""
+    logger.info("Received /generate_documents (legacy)")
+    # Convert old request to new format
+    new_req = DocumentGenerationRequest(
+        source_collections=req.source_collections,
+        source_doc_ids=req.source_doc_ids,
+        doc_title=req.doc_title,
+        sectioning_strategy=req.sectioning_strategy,
+        chunks_per_section=req.chunks_per_section,
+        max_workers=req.max_actor_workers
+    )
+    return await generate_document(new_req)
+
+@router.post("/generate_test_plan")
+async def generate_test_plan_legacy(req: dict):
+    """Legacy endpoint - redirects to /generate"""
+    logger.info("Received /generate_test_plan (legacy)")
+    new_req = DocumentGenerationRequest(**req)
+    return await generate_document(new_req)
+
+@router.post("/generate_optimized_test_plan")
+async def generate_optimized_test_plan_legacy(req: dict):
+    """Legacy endpoint - redirects to /generate"""
+    logger.info("Received /generate_optimized_test_plan (legacy)")
+    new_req = DocumentGenerationRequest(**req)
+    return await generate_document(new_req)
+
+# === UNIFIED DOCUMENT GENERATION ===
+# Single endpoint: /generate handles all document generation with intelligent routing
+# Legacy endpoints redirect for backward compatibility
+
+
+@router.delete("/generated-testplan/{document_id}")
+async def delete_generated_testplan(document_id: str, collection_name: Optional[str] = None):
+    """Delete a generated test plan from Chroma (defaults to generated_test_plan collection)."""
+    try:
+        chroma_url = os.getenv("CHROMA_URL", "http://localhost:8020")
+        collection = collection_name or os.getenv("GENERATED_TESTPLAN_COLLECTION", "generated_test_plan")
+        payload = {"collection_name": collection, "ids": [document_id]}
+        resp = requests.post(f"{chroma_url}/documents/remove", json=payload, timeout=15)
+        if resp.ok:
+            return {"message": f"Deleted {document_id} from {collection}"}
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete generated test plan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class PreviewRequest(BaseModel):
     source_collections:   Optional[List[str]]   = None
@@ -974,6 +1025,53 @@ async def get_generated_documents():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/export-testplan-word")
+async def export_testplan_word(payload: Dict[str, Any]):
+    """
+    Export a generated test plan (stored in ChromaDB) to a Word document.
+    Body: {"document_id": str, "collection_name": str?}
+    Defaults to collection 'generated_test_plan' if not provided.
+    """
+    try:
+        document_id = payload.get("document_id")
+        collection_name = payload.get("collection_name") or os.getenv("GENERATED_TESTPLAN_COLLECTION", "generated_test_plan")
+        if not document_id:
+            raise HTTPException(status_code=400, detail="document_id is required")
+
+        # Fetch documents from Chroma and find the one we need
+        chroma_url = os.getenv("CHROMA_URL", "http://localhost:8020")
+        resp = requests.get(f"{chroma_url}/documents", params={"collection_name": collection_name}, timeout=30)
+        if not resp.ok:
+            raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch collection: {resp.text}")
+        data = resp.json()
+        ids = data.get("ids", [])
+        docs = data.get("documents", [])
+        metas = data.get("metadatas", [])
+
+        try:
+            idx = ids.index(document_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found in collection")
+
+        content = docs[idx] or ""
+        title = (metas[idx] or {}).get("title") or "Generated Test Plan"
+
+        # Export using WordExportService
+        word_bytes = word_export_service.export_markdown_to_word(title, content)
+        b64 = base64.b64encode(word_bytes).decode("utf-8")
+        filename = f"{title.replace(' ', '_')}.docx"
+        return {"filename": filename, "content_b64": b64}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export test plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+## Removed legacy export-pipeline-word endpoint
+
+# ===== Bulk cleanup/removal of generated test plans =====
+## Removed legacy generated-testplans remove/cleanup endpoints
+
 @router.delete("/generated-documents/{document_id}")
 async def delete_generated_document(document_id: str):
     """Delete a generated document from vector store"""
@@ -987,7 +1085,7 @@ async def delete_generated_document(document_id: str):
         }
         
         response = requests.post(
-            f"{chroma_url}/documents/delete",
+            f"{chroma_url}/documents/remove",
             json=payload,
             timeout=10
         )

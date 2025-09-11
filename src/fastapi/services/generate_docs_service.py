@@ -11,11 +11,12 @@ from bs4 import BeautifulSoup
 from services.rag_service import RAGService
 from services.agent_service import AgentService
 from services.llm_service import LLMService
-from services.test_plan_agents import OptimizedTestPlanService
 import re
 import json
 import time
 import redis
+from datetime import datetime
+from services.database import SessionLocal, ComplianceAgent
 try:
     import tiktoken
     TIKTOKEN_AVAILABLE = True
@@ -103,9 +104,6 @@ class DocumentService:
         self.llm = llm_service
         self.chroma_url = chroma_url.rstrip("/")
         self.agent_api = agent_api_url.rstrip("/")
-        # Initialize optimized test plan service with default collection
-        # Collection name will be updated when generate_optimized_test_plan is called
-        self.optimized_test_plan_service = OptimizedTestPlanService(llm_service, "default_collection")
         # Token encoder for counting tokens
         if TIKTOKEN_AVAILABLE:
             try:
@@ -584,195 +582,15 @@ class DocumentService:
         chunks_per_section: int = 5,
     ) -> List[dict]:
         """
-        Generate test plan using the optimized multi-agent workflow:
-        1. Extract rules/requirements per section
-        2. Generate test steps per section  
-        3. Consolidate into comprehensive test plan
-        4. Document assembly and processing
-        5. Caching for O(log n) performance
+        DEPRECATED: Use _generate_direct_test_plan_with_reconstruction() instead.
+        This method now redirects to the direct reconstruction approach only.
         """
-        # Extract document sections using existing logic
-        sections = self._extract_document_sections(
-            source_collections, source_doc_ids, True, 5,
-            sectioning_strategy="by_metadata" if sectioning_strategy == "auto" else sectioning_strategy,  # Prefer metadata-based sectioning for complete content
-            chunks_per_section=max(chunks_per_section, 20),  # Increased to 20 chunks per section for maximum content coverage
+        print("WARNING: generate_optimized_test_plan is deprecated, redirecting to direct reconstruction approach")
+        return self._generate_direct_test_plan_with_reconstruction(
+            source_collections=source_collections or [],
+            source_doc_ids=source_doc_ids or [],
+            doc_title=doc_title or "Test Plan"
         )
-        
-        if not sections:
-            print("WARNING: No sections extracted from ChromaDB collections.")
-            print("Attempting fallback: direct content analysis mode...")
-            
-            # Fallback: Try to generate test plan from direct document content analysis
-            # This happens when ChromaDB is empty or not accessible
-            return self._generate_test_plan_fallback_mode(
-                doc_title=doc_title or "Test Plan",
-                source_collections=source_collections,
-                source_doc_ids=source_doc_ids,
-                max_workers=max_workers
-            )
-        
-        print(f"Extracted {len(sections)} sections for analysis")
-        
-        # Debug: Log section sizes to verify no truncation
-        total_content_length = 0
-        for section_name, section_content in sections.items():
-            section_length = len(section_content)
-            total_content_length += section_length
-            print(f"Section '{section_name[:50]}...': {section_length} characters")
-        
-        print(f"Total content length across all sections: {total_content_length} characters")
-        
-        # Use optimized test plan service with streaming pipeline
-        try:
-            # Generate unique document ID for Redis caching
-            document_id = f"testplan_{uuid.uuid4().hex[:12]}"
-            
-            # Update the collection name if provided
-            collection_name = source_collections[0] if source_collections else "default_collection"
-            self.optimized_test_plan_service.collection_name = collection_name
-            self.optimized_test_plan_service.rule_extraction_agent.collection_name = collection_name
-            self.optimized_test_plan_service.test_step_generator.collection_name = collection_name
-
-            # Build a retriever filter to restrict RAG to selected Chroma documents
-            retriever_filter = None
-            if source_doc_ids:
-                # Prefer filtering by document_id; also attempt document_name via $or for robustness
-                # Chroma Python client expects "filter" with operators like "$in"
-                retriever_filter = {
-                    "$or": [
-                        {"document_id": {"$in": source_doc_ids}},
-                        {"document_name": {"$in": source_doc_ids}},
-                    ]
-                }
-                # Apply filter to optimized service and underlying agents
-                self.optimized_test_plan_service.retriever_filter = retriever_filter
-                self.optimized_test_plan_service.rule_extraction_agent.retriever_filter = retriever_filter
-                self.optimized_test_plan_service.test_step_generator.retriever_filter = retriever_filter
-            
-            print("===== CALLING REDIS STREAMING PIPELINE WITH RAG =====")
-            print(f"Service streaming enabled: {self.optimized_test_plan_service.use_streaming}")
-            print(f"Document ID: {document_id}")
-            print(f"Collection name: {collection_name}")
-
-            # Index this run in Redis for discovery
-            try:
-                rhost = os.getenv("REDIS_HOST", "redis")
-                rport = int(os.getenv("REDIS_PORT", 6379))
-                rcli = redis.Redis(host=rhost, port=rport, decode_responses=True)
-                created_at = datetime.now().isoformat()
-                meta_key = f"doc:{document_id}:meta"
-                rcli.hset(meta_key, mapping={
-                    "title": doc_title or "Comprehensive Test Plan",
-                    "collection": collection_name,
-                    "created_at": created_at,
-                    "status": "PROCESSING",
-                    "section_count": str(len(sections)),
-                    "source_doc_ids": json.dumps(source_doc_ids or [])
-                })
-                rcli.sadd("doc:index", document_id)
-                rcli.zadd("doc:recent", {document_id: time.time()})
-            except Exception as e:
-                print(f"Redis indexing error: {e}")
-            
-            test_plan_result = self.optimized_test_plan_service.generate_comprehensive_test_plan_streaming(
-                sections=sections,
-                document_id=document_id,
-                max_workers=max_workers
-            )
-            
-            # Create Word document from the structured result
-            doc = Document()
-            title = doc_title or test_plan_result.title
-            doc.add_heading(title, level=1)
-            
-            # The consolidated_plan now contains the complete markdown test plan
-            final_markdown = test_plan_result.consolidated_plan
-            
-            # Convert markdown to Word document sections
-            if final_markdown and final_markdown.startswith('#'):
-                # Parse and add the markdown content to Word
-                self._convert_markdown_to_docx(final_markdown, doc)
-            else:
-                # Fallback to simple structure
-                doc.add_paragraph("Generated using section-based multi-agent test plan system")
-            
-            # The markdown already contains all the detailed sections, so no need for additional section details
-            
-            # Add critic review
-            doc.add_heading('Quality Review', level=2)
-            try:
-                critic_review = json.loads(test_plan_result.critic_feedback)
-                doc.add_paragraph(f"Processing Status: {critic_review.get('processing_status', 'Unknown')}")
-                doc.add_paragraph(f"Confidence Score: {critic_review.get('confidence_score', 'N/A')}")
-                
-                if critic_review.get('review_summary'):
-                    doc.add_paragraph(critic_review['review_summary'])
-                
-                if critic_review.get('recommendations'):
-                    doc.add_heading('Recommendations', level=3)
-                    for rec in critic_review['recommendations']:
-                        doc.add_paragraph(f"• {rec}")
-                        
-            except json.JSONDecodeError:
-                doc.add_paragraph("Critic review completed")
-            
-            # Serialize document
-            buf = io.BytesIO()
-            doc.save(buf)
-
-            # Save to vector store
-            doc_text = self._extract_text_from_docx_object(doc)
-            doc_session_id = str(uuid.uuid4())
-            generated_doc_info = self._save_to_vector_store(
-                title=title,
-                content=doc_text,
-                template_collection="generated_documents",
-                agent_ids=None,
-                session_id=doc_session_id
-            )
-
-            # Update Redis run metadata
-            try:
-                if 'rcli' in locals():
-                    rcli.hset(f"doc:{document_id}:meta", mapping={
-                        "status": test_plan_result.processing_status or "COMPLETED",
-                        "completed_at": datetime.now().isoformat(),
-                        "total_testable_items": str(test_plan_result.metadata.get('total_testable_items', 0)),
-                        "total_test_procedures": str(test_plan_result.metadata.get('total_test_procedures', 0)),
-                        "generated_document_id": generated_doc_info.get("document_id", "")
-                    })
-            except Exception as e:
-                print(f"Redis meta update error: {e}")
-            
-            return [{
-                "title": title,
-                "docx_b64": base64.b64encode(buf.getvalue()).decode("utf-8"),
-                "document_id": generated_doc_info.get("document_id"),
-                "collection_name": generated_doc_info.get("collection_name"),
-                "generated_at": generated_doc_info.get("generated_at"),
-                "redis_document_id": document_id,
-                "processing_status": test_plan_result.processing_status,
-                "meta": {
-                    "architecture": "section_based_multi_agent_workflow",
-                    "total_sections": len(test_plan_result.sections),
-                    "total_testable_items": test_plan_result.metadata.get('total_testable_items', 0),
-                    "total_test_procedures": test_plan_result.metadata.get('total_test_procedures', 0),
-                    "sections_with_tests": sum(1 for s in test_plan_result.sections if len(s.test_steps.get('test_procedures', [])) > 0),
-                    "processing_optimized": True,
-                    "cache_enabled": True,
-                    "section_based": True,
-                    "max_workers": max_workers,
-                    **test_plan_result.metadata
-                }
-            }]
-            
-        except Exception as e:
-            print(f"Error in optimized test plan generation: {e}")
-            return [{
-                "title": doc_title or "Test Plan", 
-                "content": f"Error in optimized generation: {str(e)}", 
-                "error": str(e)
-            }]
 
     def _convert_markdown_to_docx(self, markdown_content: str, doc: Document):
         """Convert markdown content to Word document structure (like notebook markdown_to_docx)"""
@@ -796,6 +614,18 @@ class DocumentService:
             elif line_clean.startswith('#### '):
                 # H4 - Sub-sub-sections
                 doc.add_heading(line_clean[5:].strip(), level=4)
+            elif line_clean.startswith('Step ') and ':' in line_clean:
+                # Explicit test step lines: render as paragraph with bold label, no auto-numbering
+                try:
+                    step_label, step_text = line_clean.split(':', 1)
+                except ValueError:
+                    doc.add_paragraph(line_clean)
+                else:
+                    p = doc.add_paragraph()
+                    run = p.add_run(step_label + ':')
+                    run.bold = True
+                    if step_text.strip():
+                        p.add_run(' ' + step_text.strip())
             elif line_clean.startswith('**') and line_clean.endswith('**'):
                 # Bold text as heading
                 doc.add_heading(line_clean[2:-2].strip(), level=4)
@@ -803,8 +633,9 @@ class DocumentService:
                 # Bullet points
                 doc.add_paragraph(line_clean[2:].strip(), style='List Bullet')
             elif re.match(r'^\d+\.', line_clean):
-                # Numbered lists
-                doc.add_paragraph(line_clean, style='List Number')
+                # Numbered lists: strip literal number to avoid duplicated numbering in Word
+                content = re.sub(r'^\d+\.\s*', '', line_clean)
+                doc.add_paragraph(content, style='List Number')
             elif line_clean.startswith('**') and ':' in line_clean:
                 # Bold labels (like "Dependencies:")
                 parts = line_clean.split(':', 1)
@@ -968,28 +799,7 @@ class DocumentService:
         print("Generating comprehensive test plan template without document-specific content")
         
         try:
-            # Create a comprehensive test plan based on common military/technical standards patterns
-            fallback_sections = self._create_comprehensive_test_template()
-            
-            # Use the optimized test plan service with direct content instead of RAG
-            document_id = f"fallback_testplan_{uuid.uuid4().hex[:12]}"
-            
-            # Temporarily configure the service for direct queries instead of RAG
-            collection_name = source_collections[0] if source_collections else "fallback_collection"
-            self.optimized_test_plan_service.collection_name = collection_name
-            self.optimized_test_plan_service.rule_extraction_agent.collection_name = collection_name
-            self.optimized_test_plan_service.test_step_generator.collection_name = collection_name
-            
-            print(f"Fallback mode: Processing {len(fallback_sections)} template sections")
-            
-            # Generate test plan using the template sections
-            test_plan_result = self.optimized_test_plan_service.generate_comprehensive_test_plan_streaming(
-                sections=fallback_sections,
-                document_id=document_id,
-                max_workers=max_workers
-            )
-            
-            # Create Word document
+            # Create a simple fallback test plan template
             doc = Document()
             doc.add_heading(doc_title, level=1)
             
@@ -997,35 +807,25 @@ class DocumentService:
             notice_para = doc.add_paragraph()
             notice_run = notice_para.add_run("⚠️ NOTICE: ")
             notice_run.bold = True
-            notice_para.add_run("This test plan was generated in fallback mode due to missing source documents. "
-                              "Please customize the test procedures based on your specific requirements and upload "
-                              "source documents to ChromaDB for more accurate test plan generation.")
+            notice_para.add_run("This is a fallback test plan template generated due to missing source documents. "
+                              "Please upload source documents to ChromaDB for proper test plan generation.")
             
-            # Add the generated content
-            final_markdown = test_plan_result.consolidated_plan
-            if final_markdown and final_markdown.startswith('#'):
-                self._convert_markdown_to_docx(final_markdown, doc)
-            else:
-                doc.add_heading('Generated Test Sections', level=2)
-                doc.add_paragraph("The following test sections were generated based on common compliance patterns:")
-                
-                # Add template sections directly if markdown conversion fails
-                for section_title, section_content in fallback_sections.items():
-                    doc.add_heading(section_title.replace("Template - ", ""), level=3)
-                    doc.add_paragraph(section_content[:500] + "..." if len(section_content) > 500 else section_content)
-            
-            # Add customization guidance
-            doc.add_heading('Customization Required', level=2)
-            customization_items = [
-                "Review and modify test procedures based on actual system requirements",
-                "Add specific test data, configurations, and environment setups", 
-                "Define acceptance criteria and pass/fail thresholds",
-                "Specify test equipment, tools, and measurement methods",
-                "Add traceability to specific requirement documents",
-                "Include risk assessments and mitigation strategies"
+            # Add basic test plan structure
+            doc.add_heading('Basic Test Plan Template', level=2)
+            basic_sections = [
+                "1. Test Scope and Objectives",
+                "2. Test Environment Setup", 
+                "3. Functional Requirements Testing",
+                "4. Performance Requirements Testing",
+                "5. Interface Testing",
+                "6. Error Handling and Recovery Testing",
+                "7. Acceptance Criteria",
+                "8. Test Schedule and Resources"
             ]
-            for item in customization_items:
-                doc.add_paragraph(f"• {item}", style='List Bullet')
+            
+            for section in basic_sections:
+                doc.add_paragraph(section, style='List Number')
+                doc.add_paragraph(f"[TODO: Define test procedures for {section.split('. ')[1]}]")
             
             # Serialize document
             buf = io.BytesIO()
@@ -1034,15 +834,12 @@ class DocumentService:
             return [{
                 "title": doc_title,
                 "docx_b64": base64.b64encode(buf.getvalue()).decode("utf-8"),
-                "document_id": document_id,
-                "processing_status": "generated_fallback_mode",
+                "document_id": f"fallback_{uuid.uuid4().hex[:8]}",
+                "processing_status": "fallback_template_mode",
                 "meta": {
-                    "architecture": "fallback_template_based",
-                    "total_sections": len(fallback_sections),
-                    "mode": "fallback_no_chromadb",
-                    "customization_required": True,
-                    "template_based": True,
-                    "notice": "Generated without source documents - requires customization"
+                    "architecture": "fallback_template",
+                    "mode": "fallback_no_source_documents",
+                    "customization_required": True
                 }
             }]
             
@@ -1093,6 +890,498 @@ class DocumentService:
                 }
             }]
             
+    def _generate_direct_test_plan_with_reconstruction(
+        self,
+        source_collections: List[str],
+        source_doc_ids: List[str], 
+        doc_title: str,
+    ) -> List[dict]:
+        """
+        Generate test plan using document reconstruction approach with improved formatting.
+        Only generates test procedures for actual requirements (sentences with modal verbs).
+        """
+        try:
+            print("=== DOCUMENT RECONSTRUCTION APPROACH ===")
+            
+            # Use document reconstruction to get original document structure
+            test_plan_content = ""
+            
+            for collection in source_collections:
+                for doc_id in source_doc_ids:
+                    try:
+                        print(f"DEBUG: Reconstructing document {doc_id} from collection {collection}")
+                        
+                        # Fetch reconstructed document
+                        response = requests.get(
+                            f"{self.chroma_url}/documents/reconstruct/{doc_id}",
+                            params={"collection_name": collection},
+                            timeout=120
+                        )
+                        
+                        if not response.ok:
+                            print(f"ERROR: Failed to reconstruct {doc_id}: {response.status_code}")
+                            continue
+                        
+                        reconstruction_data = response.json()
+                        full_content = reconstruction_data.get("reconstructed_content", "")
+                        doc_name = reconstruction_data.get("document_name", doc_id)
+                        
+                        if not full_content:
+                            print(f"WARNING: Empty content for {doc_id}")
+                            continue
+                        
+                        print(f"DEBUG: Processing reconstructed document: {doc_name}")
+                        print(f"DEBUG: Document length: {len(full_content)} chars")
+                        
+                        # Clean up and add test procedures with improved logic
+                        processed_content = self._process_reconstructed_document_with_test_procedures(full_content)
+                        test_plan_content += processed_content + "\n\n"
+                        
+                    except Exception as e:
+                        print(f"ERROR: Exception processing {doc_id}: {e}")
+                        continue
+            
+            if not test_plan_content.strip():
+                return [{
+                    "title": doc_title,
+                    "content": "ERROR: No content could be reconstructed from the specified documents.",
+                    "error": "Document reconstruction failed"
+                }]
+            
+            # Create Word document
+            doc = Document()
+            doc.add_heading(doc_title, level=1)
+            
+            # Add the processed content
+            self._add_text_to_docx(test_plan_content, doc)
+            
+            # Serialize document 
+            buf = io.BytesIO()
+            doc.save(buf)
+            
+            # Save to vector store
+            doc_text = self._extract_text_from_docx_object(doc)
+            doc_session_id = str(uuid.uuid4())
+            generated_doc_info = self._save_to_vector_store(
+                title=doc_title,
+                content=doc_text, 
+                template_collection="Test_Plans",
+                agent_ids=None,
+                session_id=doc_session_id
+            )
+            
+            return [{
+                "title": doc_title,
+                "docx_b64": base64.b64encode(buf.getvalue()).decode("utf-8"),
+                "document_id": generated_doc_info.get("document_id"),
+                "collection_name": "Test_Plans",
+                "processing_status": "COMPLETED",
+                "meta": {
+                    "architecture": "document_reconstruction_with_requirements_filtering",
+                    "approach": "preserve_original_format_add_test_procedures",
+                    "modal_verb_filtering": True,
+                    "numbered_steps": True
+                }
+            }]
+            
+        except Exception as e:
+            print(f"ERROR: Document reconstruction approach failed: {e}")
+            return [{
+                "title": doc_title,
+                "content": f"Error in document reconstruction: {str(e)}",
+                "error": str(e)
+            }]
+    
+    def _process_reconstructed_document_with_test_procedures(self, full_content: str) -> str:
+        """Process reconstructed document and add test procedures only after requirement sections"""
+        import re
+        
+        # First, let's create a clean document structure based on the PDF format
+        clean_content = self._create_clean_document_structure(full_content)
+        
+        lines = clean_content.split('\n')
+        result_lines = []
+        current_section_lines = []
+        current_section_title = ""
+        test_procedure_counter = 1
+        
+        for line in lines:
+            line_clean = line.strip()
+            if not line_clean:
+                continue
+                
+            # Check if this is a section header like "1. SCOPE", "4.4.1 Equipment", etc.
+            section_match = re.match(r'^(\d+(?:\.\d+)*)\s+(.+)', line_clean)
+            
+            if section_match:
+                # Process previous section if it had requirements
+                if current_section_lines and current_section_title:
+                    section_content = '\n'.join(current_section_lines).strip()
+                    if self._section_has_actual_requirements(section_content, current_section_title):
+                        result_lines.extend(current_section_lines)
+                        result_lines.append("")  # Blank line
+                        
+                        # Generate test procedures for requirements
+                        try:
+                            test_procedures = self._generate_test_procedures_for_requirements(
+                                section_content, test_procedure_counter
+                            )
+                            result_lines.extend(test_procedures)
+                            test_procedure_counter += len([tp for tp in test_procedures if 'Test Procedure' in tp])
+                        except Exception as e:
+                            result_lines.append(f"**Test Procedure {test_procedure_counter}:** Manual review required - {str(e)[:50]}")
+                            test_procedure_counter += 1
+                        
+                        result_lines.append("")  # Blank line after test procedures
+                    else:
+                        # Just add the section without test procedures
+                        result_lines.extend(current_section_lines)
+                        result_lines.append("")
+                
+                # Start new section
+                current_section_title = section_match.group(2).strip()
+                current_section_lines = [line_clean]  # Use the clean line
+            else:
+                # Add line to current section
+                current_section_lines.append(line_clean)
+        
+        # Process the last section
+        if current_section_lines and current_section_title:
+            section_content = '\n'.join(current_section_lines).strip()
+            if self._section_has_actual_requirements(section_content, current_section_title):
+                result_lines.extend(current_section_lines)
+                result_lines.append("")
+                try:
+                    test_procedures = self._generate_test_procedures_for_requirements(
+                        section_content, test_procedure_counter
+                    )
+                    result_lines.extend(test_procedures)
+                except Exception as e:
+                    result_lines.append(f"**Test Procedure {test_procedure_counter}:** Manual review required - {str(e)[:50]}")
+            else:
+                result_lines.extend(current_section_lines)
+        
+        return '\n'.join(result_lines)
+    
+    def _create_clean_document_structure(self, content: str) -> str:
+        """Create a clean document structure that matches the original PDF format"""
+        import re
+        
+        # Define the clean document structure based on what we know from the PDF
+        clean_sections = []
+        
+        # Title and header information
+        if "MIL-STD-188-203-1A" in content:
+            clean_sections.extend([
+                "MIL-STD-188-203-1A",
+                "8 January 1988",
+                "Superseding MIL-STD-188-203-1",
+                "10 September 1982",
+                "",
+                "MILITARY STANDARD",
+                "Interoperability and Performance Standards for",
+                "Tactical Digital Information Link (TADIL) A",
+                ""
+            ])
+        
+        # Extract and clean main sections
+        lines = content.split('\n')
+        current_content = []
+        
+        for line in lines:
+            line_clean = line.strip()
+            if not line_clean:
+                continue
+                
+            # Minimize cleanup to preserve original enumerations and formatting
+            # Only remove obvious page-number artifacts like "43. 4.4.1 Equipment" -> "4.4.1 Equipment"
+            line_clean = re.sub(r'^\d+\.\s*(\d+(?:\.\d+)*\s+)', r'\1', line_clean)
+
+            # Only keep lines that look like real content
+            if line_clean and not re.match(r'^\d+$', line_clean):
+                current_content.append(line_clean)
+        
+        # Add the main content sections
+        clean_sections.extend(current_content)
+        
+        # Create the final clean content
+        result = []
+        for line in clean_sections:
+            if line.strip():
+                result.append(line.strip())
+        
+        return '\n'.join(result)
+    
+    def _final_cleanup_enumeration(self, text: str) -> str:
+        """Final pass to remove any remaining enumerated bullet points from the text"""
+        import re
+        
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Skip lines that are section headers, test procedures, or important structure
+            if (line.strip().startswith('**Test Procedure') or 
+                line.strip().startswith('##') or
+                line.strip().startswith('#') or
+                re.match(r'^\d+(?:\.\d+)*\s+[A-Z]', line.strip()) or
+                line.strip().upper().startswith(('SCOPE', 'REQUIREMENTS', 'APPENDIX', 'FIGURE', 'TABLE'))):
+                cleaned_lines.append(line)
+                continue
+                
+            # Clean up enumerated patterns at the start of lines
+            cleaned_line = line
+            
+            # Remove patterns like "43. some content" but preserve section numbers like "5.1.3 Requirements"
+            # More aggressive pattern to catch all enumeration at line start
+            if not re.match(r'^\s*\d+(?:\.\d+)*\s+[A-Z][A-Z\s]*', cleaned_line):
+                # Remove simple numbered lists that aren't section headers - be more aggressive
+                cleaned_line = re.sub(r'^\s*\d+\.\s+', '', cleaned_line)  # "43. text"
+                cleaned_line = re.sub(r'^\s*\d+\)\s+', '', cleaned_line)  # "43) text"
+                
+                # Remove nested patterns like "30.3.2.1"
+                cleaned_line = re.sub(r'^\s*\d+\.\d+\.\d+\.\d+\s+', '', cleaned_line)
+                cleaned_line = re.sub(r'^\s*\d+\.\d+\.\d+\s+', '', cleaned_line)
+                cleaned_line = re.sub(r'^\s*\d+\.\d+\s+', '', cleaned_line)
+                
+                # Extra aggressive: remove any number followed by period at start of line
+                # But only if it's not clearly a section header with all caps following
+                if not re.match(r'^\s*\d+(?:\.\d+)*\s+[A-Z][A-Z\s]+', cleaned_line):
+                    cleaned_line = re.sub(r'^\s*\d+\.\s*', '', cleaned_line)
+            
+            # Only add non-empty lines
+            if cleaned_line.strip():
+                cleaned_lines.append(cleaned_line)
+        
+        return '\n'.join(cleaned_lines)
+    
+    def _section_has_actual_requirements(self, section_content: str, section_title: str) -> bool:
+        """Check if section has actual requirements with modal verbs (shall, must, will, etc.)"""
+        import re
+        
+        # Skip certain sections that should never have test procedures
+        skip_sections = [
+            'table of contents', 'contents', 'foreword', 'introduction', 
+            'scope', 'referenced documents', 'definitions', 'appendix',
+            'bibliography', 'index', 'glossary', 'purpose', 'overview',
+            'abstract', 'summary', 'acknowledgments', 'preface'
+        ]
+        
+        title_lower = section_title.lower()
+        if any(skip_term in title_lower for skip_term in skip_sections):
+            print(f"DEBUG: Skipping section '{section_title}' - document structure section")
+            return False
+        
+        # Look for actual requirement sentences with modal verbs
+        modal_verbs = [
+            r'\bshall\b', r'\bmust\b', r'\bwill\b', r'\bshould\b', 
+            r'\bwould\b', r'\bcan\b', r'\bmay\b', r'\brequired\b'
+        ]
+        
+        sentences = re.split(r'[.!?]+', section_content)
+        requirement_count = 0
+        
+        for sentence in sentences:
+            sentence_clean = sentence.strip()
+            if len(sentence_clean) > 25:  # Only substantial sentences
+                for modal_pattern in modal_verbs:
+                    if re.search(modal_pattern, sentence_clean.lower()):
+                        requirement_count += 1
+                        break
+        
+        has_requirements = requirement_count >= 1
+        
+        if has_requirements:
+            print(f"DEBUG: Section '{section_title}' has {requirement_count} requirement sentences - adding test procedures")
+        else:
+            print(f"DEBUG: Skipping section '{section_title}' - no modal verb requirements found")
+        
+        return has_requirements
+    
+    def _generate_test_procedures_for_requirements(self, section_content: str, start_counter: int) -> List[str]:
+        """Generate test procedures with properly numbered steps for requirements"""
+        import re
+        
+        # Extract actual requirement sentences
+        modal_verbs = [
+            r'\bshall\b', r'\bmust\b', r'\bwill\b', r'\bshould\b', 
+            r'\bwould\b', r'\bcan\b', r'\bmay\b', r'\brequired\b'
+        ]
+        
+        sentences = re.split(r'[.!?]+', section_content)
+        requirement_sentences = []
+        
+        for sentence in sentences:
+            sentence_clean = sentence.strip()
+            if len(sentence_clean) > 25:
+                for modal_pattern in modal_verbs:
+                    if re.search(modal_pattern, sentence_clean.lower()):
+                        requirement_sentences.append(sentence_clean + '.')
+                        break
+        
+        if not requirement_sentences:
+            return []
+        
+        # Generate one test procedure per requirement (cap to avoid huge output)
+        max_requirements = 10
+        requirements_to_test = requirement_sentences[:max_requirements]
+        
+        prompt = f"""Generate test procedures ONLY for requirements containing modal verbs (shall, must, will, should, etc.).
+
+REQUIREMENTS TO TEST:
+{' '.join(requirements_to_test)}
+
+Create one distinct test procedure PER requirement sentence below. Number test procedures sequentially starting from {start_counter}.
+
+Format each procedure EXACTLY like this (use Step 1, Step 2, Step 3 labels):
+
+Test Procedure {start_counter}: [Brief Title]
+• **Requirement:** "[Exact requirement sentence]"
+• **Method:** [Testing method]
+• **Steps:**
+Step 1: [First step with specific actions]
+Step 2: [Second step with specific actions]
+Step 3: [Third step with specific actions]
+• **Pass Criteria:** [Clear measurable criteria]
+
+IMPORTANT:
+- Create one test procedure for EACH requirement sentence provided
+- Use "Step 1:", "Step 2:", "Step 3:" labels (not numeric list 1., 2., 3.)
+- Keep procedures practical and executable
+- Focus on the specific requirement being tested
+- Do NOT use numbered bullets like "1.", "2.", "3."; only use "Step N:" labels
+
+Generate the procedures now:"""
+
+        try:
+            response, _ = self.llm.query_direct(
+                model_name="gpt-4",
+                query=prompt
+            )
+            
+            # Clean up response and return as lines
+            lines = []
+            for line in response.strip().split('\n'):
+                if line.strip():
+                    lines.append(line.strip())
+            
+            return lines
+            
+        except Exception as e:
+            return [f"**Test Procedure {start_counter}:** Error generating - {str(e)[:50]}"]
+    
+    def _add_text_to_docx(self, text_content: str, doc: Document):
+        """Add text content to Word document with proper formatting"""
+        import re
+        lines = text_content.split('\n')
+        
+        for line in lines:
+            line_clean = line.strip()
+            if not line_clean:
+                continue
+            
+            # Detect section headers based on content patterns (not just markdown)
+            # Pattern 1: Section numbers like "4.4.1 Equipment" or "5.1.3 Requirements"
+            section_match = re.match(r'^(\d+(?:\.\d+)*)\s+(.+)', line_clean)
+            if section_match:
+                section_num = section_match.group(1)
+                section_title = section_match.group(2)
+                # Determine heading level based on number of dots
+                level = min(section_num.count('.') + 1, 6)  # Max level 6 in Word
+                doc.add_heading(f"{section_num} {section_title}", level=level)
+                continue
+                
+            # Handle markdown-style headers
+            if line_clean.startswith('# '):
+                doc.add_heading(line_clean[2:], level=1)
+            elif line_clean.startswith('## '):
+                doc.add_heading(line_clean[3:], level=2)
+            elif line_clean.startswith('### '):
+                doc.add_heading(line_clean[4:], level=3)
+            elif line_clean.startswith('#### '):
+                doc.add_heading(line_clean[5:], level=4)
+                
+            # Handle test procedures as bold headings
+            elif line_clean.startswith('**Test Procedure'):
+                # Extract the test procedure text and make it a proper heading
+                test_proc_text = line_clean.replace('**', '').strip()
+                doc.add_heading(test_proc_text, level=4)
+                
+            # Handle bullet points with bold elements
+            elif line_clean.startswith('• **') and ':**' in line_clean:
+                # Format like "• **Requirement:** text" as bullet with bold label
+                parts = line_clean.split(':**', 1)
+                if len(parts) == 2:
+                    label = parts[0].replace('• **', '').strip()
+                    content = parts[1].strip()
+                    para = doc.add_paragraph(style='List Bullet')
+                    run = para.add_run(f"{label}: ")
+                    run.bold = True
+                    para.add_run(content)
+                else:
+                    doc.add_paragraph(line_clean, style='List Bullet')
+            
+            # Handle regular bullet points
+            elif line_clean.startswith('• '):
+                doc.add_paragraph(line_clean[2:], style='List Bullet')
+                
+            # Handle step formatting
+            elif line_clean.startswith('Step ') and ':' in line_clean:
+                # Render as plain paragraph with bolded label to avoid Word re-numbering
+                try:
+                    step_label, step_text = line_clean.split(':', 1)
+                except ValueError:
+                    doc.add_paragraph(line_clean)
+                else:
+                    p = doc.add_paragraph()
+                    run = p.add_run(step_label + ':')
+                    run.bold = True
+                    if step_text.strip():
+                        p.add_run(' ' + step_text.strip())
+                
+            # Handle numbered lists (but not section headers)
+            elif re.match(r'^\d+\.', line_clean) and not re.match(r'^\d+(?:\.\d+)*\s+[A-Z]', line_clean):
+                # Strip literal numbers to avoid duplicate numbering text
+                content = re.sub(r'^\d+\.\s*', '', line_clean)
+                doc.add_paragraph(content, style='List Number')
+                
+            # Handle all caps headers (like "SCOPE", "REQUIREMENTS") 
+            elif (line_clean.isupper() and 
+                  len(line_clean.split()) <= 8 and 
+                  len(line_clean) > 3 and
+                  not line_clean.endswith('.') and
+                  not line_clean.startswith(('THE ', 'THIS ', 'THESE '))):
+                doc.add_heading(line_clean, level=2)
+                
+            # Regular paragraphs
+            else:
+                doc.add_paragraph(line_clean)
+    
+    def generate_test_plan(
+        self,
+        source_collections: List[str],
+        source_doc_ids: List[str],
+        doc_title: str,
+        use_direct_processing: Optional[bool] = None
+    ) -> List[dict]:
+        """
+        Main entry point for test plan generation.
+        Simplified to always use the document reconstruction approach to avoid pipeline artifacts in documents.
+        """
+        try:
+            print("=== USING DOCUMENT RECONSTRUCTION APPROACH (pipeline disabled in generator) ===")
+            return self._generate_direct_test_plan_with_reconstruction(
+                source_collections, source_doc_ids, doc_title
+            )
+                
+        except Exception as e:
+            print(f"ERROR: Test plan generation failed: {e}")
+            return [{
+                "title": doc_title,
+                "content": f"Error in test plan generation: {str(e)}",
+                "error": str(e)
+            }]
+
     def _create_comprehensive_test_template(self) -> Dict[str, str]:
         """Create a comprehensive test plan template based on common military/technical standards"""
         
@@ -1145,15 +1434,15 @@ The test environment shall consist of:
 - Test data sets prepared and verified
             """,
             
-            "Template - 3. Functional Requirements": """
+"Template - 3. Functional Requirements": """
 3. FUNCTIONAL REQUIREMENTS TESTING
 
 3.1 SYSTEM STARTUP AND INITIALIZATION
 Test Procedure:
-1. Apply power to the system
-2. Verify system initialization sequence
-3. Check status indicators and displays
-4. Confirm proper loading of configuration data
+Step 1: Apply power to the system
+Step 2: Verify system initialization sequence
+Step 3: Check status indicators and displays
+Step 4: Confirm proper loading of configuration data
 
 Expected Results:
 - System completes startup within specified time
@@ -1163,10 +1452,10 @@ Expected Results:
 
 3.2 NORMAL OPERATION MODES
 Test Procedure:
-1. Execute standard operational sequences
-2. Verify input processing and output generation
-3. Test mode transitions and state changes
-4. Validate data processing accuracy
+Step 1: Execute standard operational sequences
+Step 2: Verify input processing and output generation
+Step 3: Test mode transitions and state changes
+Step 4: Validate data processing accuracy
 
 Expected Results:
 - All operational modes function as specified
@@ -1175,15 +1464,15 @@ Expected Results:
 - Data processing meets accuracy requirements
             """,
             
-            "Template - 4. Performance Testing": """
+"Template - 4. Performance Testing": """
 4. PERFORMANCE REQUIREMENTS TESTING
 
 4.1 THROUGHPUT TESTING
 Test Procedure:
-1. Configure system for maximum throughput conditions
-2. Apply test data at specified rates
-3. Monitor system response and processing times
-4. Measure actual throughput versus requirements
+Step 1: Configure system for maximum throughput conditions
+Step 2: Apply test data at specified rates
+Step 3: Monitor system response and processing times
+Step 4: Measure actual throughput versus requirements
 
 Expected Results:
 - Throughput meets or exceeds minimum specifications
@@ -1193,10 +1482,10 @@ Expected Results:
 
 4.2 LATENCY TESTING  
 Test Procedure:
-1. Generate time-stamped test inputs
-2. Measure time from input to corresponding output
-3. Test under various load conditions
-4. Verify latency requirements are met
+Step 1: Generate time-stamped test inputs
+Step 2: Measure time from input to corresponding output
+Step 3: Test under various load conditions
+Step 4: Verify latency requirements are met
 
 Expected Results:
 - Maximum latency does not exceed specifications
@@ -1205,15 +1494,15 @@ Expected Results:
 - No significant jitter or variation
             """,
             
-            "Template - 5. Interface Testing": """
+"Template - 5. Interface Testing": """
 5. INTERFACE REQUIREMENTS TESTING
 
 5.1 COMMUNICATION INTERFACES
 Test Procedure:
-1. Verify proper electrical/physical connections
-2. Test protocol compliance and message formats
-3. Validate data exchange procedures
-4. Check error detection and recovery
+Step 1: Verify proper electrical/physical connections
+Step 2: Test protocol compliance and message formats
+Step 3: Validate data exchange procedures
+Step 4: Check error detection and recovery
 
 Expected Results:
 - All interfaces operate per specifications
@@ -1223,10 +1512,10 @@ Expected Results:
 
 5.2 USER INTERFACES
 Test Procedure:  
-1. Test all user input methods
-2. Verify display accuracy and readability
-3. Check control responsiveness
-4. Validate user feedback mechanisms
+Step 1: Test all user input methods
+Step 2: Verify display accuracy and readability
+Step 3: Check control responsiveness
+Step 4: Validate user feedback mechanisms
 
 Expected Results:
 - User inputs processed correctly
@@ -1235,15 +1524,15 @@ Expected Results:
 - Appropriate feedback provided to user
             """,
             
-            "Template - 6. Error Handling": """
+"Template - 6. Error Handling": """
 6. ERROR HANDLING AND FAULT TOLERANCE
 
 6.1 ERROR DETECTION
 Test Procedure:
-1. Introduce known error conditions
-2. Verify error detection mechanisms
-3. Check error reporting and logging
-4. Test error recovery procedures
+Step 1: Introduce known error conditions
+Step 2: Verify error detection mechanisms
+Step 3: Check error reporting and logging
+Step 4: Test error recovery procedures
 
 Expected Results:
 - All error conditions properly detected
@@ -1253,10 +1542,10 @@ Expected Results:
 
 6.2 FAULT TOLERANCE
 Test Procedure:
-1. Simulate component failures
-2. Test system degraded mode operation
-3. Verify automatic recovery capabilities
-4. Check manual recovery procedures
+Step 1: Simulate component failures
+Step 2: Test system degraded mode operation
+Step 3: Verify automatic recovery capabilities
+Step 4: Check manual recovery procedures
 
 Expected Results:
 - System continues operation during faults

@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.base
     image: base-poetry-deps
   postgres:
-    image: postgres:17
+    image: postgres:17-alpine
     container_name: postgres_db
     restart: always
     ports:
@@ -84,6 +84,9 @@ services:
       - "9020:9020"
     env_file:
       - .env
+    environment:
+      - ACTOR_COLLECT_TIMEOUT_SEC=1800
+      - ACTOR_RESULT_TIMEOUT_SEC=1200
     depends_on:
       - base-poetry-deps
       - postgres
@@ -118,6 +121,8 @@ services:
       - redis-data:/data
     networks:
       - ai_network
+    # Enable Redis persistence
+    command: redis-server --save 60 1 --loglevel warning --appendonly yes
 
 networks:
   ai_network:
@@ -125,7 +130,27 @@ networks:
 
 volumes:
   pgdata:
+    driver: local
+    labels:
+      - "backup=true"
+      - "service=postgres"
   chromadata:
+    driver: local
+    labels:
+      - "backup=true"
+      - "service=chromadb"
   ollama_models:
+    driver: local
+    labels:
+      - "backup=true"
+      - "service=ollama"
   huggingface_cache:
+    driver: local
+    labels:
+      - "backup=false"
+      - "service=fastapi"
   redis-data:
+    driver: local
+    labels:
+      - "backup=true"
+      - "service=redis"

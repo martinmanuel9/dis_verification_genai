@@ -5,8 +5,10 @@ WORKDIR /app
 # Copy the source code
 COPY . .
 
-# Create the images directory
-RUN mkdir -p /app/stored_images
+# PERSISTENCE FIX: Create directories with proper permissions
+RUN mkdir -p /app/stored_images /app/chroma_db_data && \
+    chmod 755 /app/stored_images /app/chroma_db_data && \
+    chown -R 1000:1000 /app/stored_images /app/chroma_db_data
 
 RUN python -c "from markitdown import MarkItDown; print('MarkItDown import successful')"
 

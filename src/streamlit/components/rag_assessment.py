@@ -70,7 +70,7 @@ def RAGAS_Dashboard():
             
             model_name = st.selectbox(
                 "Model:",
-                ["gpt-4","gpt-3.5-turbo"],
+                ["gpt-4", "gpt-3.5-turbo", "gpt-oss", "llama"],
                 key="rag_assessment_model"
             )
             
@@ -406,7 +406,7 @@ def RAGAS_Dashboard():
             with col1:
                 config_model = st.selectbox(
                     "Model:",
-                    ["gpt-4", "gpt-3.5-turbo"],
+                    ["gpt-4", "gpt-3.5-turbo", "gpt-oss", "llama"],
                     key="config_model"
                 )
             

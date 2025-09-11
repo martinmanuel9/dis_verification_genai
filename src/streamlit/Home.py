@@ -1,12 +1,8 @@
 import streamlit as st
-# import requests
 import os
 import nest_asyncio
-# import datetime
 from utils import * 
 import torch
-# import base64
-# from components.upload_documents import render_upload_component
 from components.healthcheck_sidebar import Healthcheck_Sidebar
 from components.direct_chat import Direct_Chat
 from components.agent_sim import Agent_Sim

@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import base64
+import os
+import time
 from utils import *
 from components.upload_documents import *
 from components.agent_creator import create_agent_form
@@ -8,19 +10,25 @@ from components.agent_creator import create_agent_form
 
 FASTAPI_API = os.getenv("FASTAPI_URL", "http://localhost:9020")
 
+def _trigger_rerun():
+    st.session_state['__last_refresh'] = time.time()
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
+
 def Document_Generator():
     st.header("Standards-Requirements Test Plan Generator")
     st.info("Generate comprehensive standards-requirements test plans directly from your source documents using multi-actor + critic.")
     st.caption("Mode: Standards-Requirements (source-only)")
     # Use only the optimized version - remove confusing options
     strategy = "Optimized Multi-Agent Workflow"
-    st.info("🚀 Using Optimized Multi-Agent Workflow with Redis streaming pipeline for comprehensive test plan generation")
-    
+
     st.subheader("Generate Test Plans")
 
     # Using Test Plan Gen (actor + critic) strategy only
     supported_models = [
-        "gpt-4", "gpt-3.5-turbo","llama"
+        "gpt-4", "gpt-3.5-turbo", "gpt-oss", "llama"
     ]
     actor_models = st.multiselect(
         "Actor models (multi)",
@@ -67,19 +75,30 @@ def Document_Generator():
         key="gen_filename"
     ).strip()
 
-    # Simplified tuning for optimized workflow
-    with st.expander("Advanced tuning", expanded=False):
-        max_actor_workers = st.number_input(
-            "Max workers (parallel processing)", min_value=1, max_value=16, value=4, step=1,
-            help="Number of parallel workers for section processing.",
-            key="sr_max_actor_workers"
+    # Processing method selection
+    with st.expander("Processing Options", expanded=False):
+        processing_method = st.radio(
+            "Processing Method",
+            options=["Auto (Recommended)", "Direct Processing", "Multi-Agent Pipeline"],
+            index=0,
+            help="Auto: Chooses best method based on document size. Direct: Fast for simple docs. Pipeline: Comprehensive for complex docs.",
+            key="processing_method"
         )
+        
+        if processing_method == "Multi-Agent Pipeline":
+            max_actor_workers = st.number_input(
+                "Max workers (parallel processing)", min_value=1, max_value=16, value=4, step=1,
+                help="Number of parallel workers for section processing.",
+                key="sr_max_actor_workers"
+            )
+        else:
+            max_actor_workers = 4  # Default for other methods
 
     # Sectioning controls
     with st.expander("Sectioning", expanded=False):
         sectioning_strategy = st.selectbox(
             "Sectioning strategy",
-            options=["auto", "by_chunks", "by_metadata"],
+            options=["smart", "by_chunks", "by_metadata"],
             index=0,
             help="How to break the source document(s) into sections for extraction.",
             key="sr_sectioning_strategy",
@@ -117,6 +136,239 @@ def Document_Generator():
                             st.error(f"Preview failed: {resp.status_code} {resp.text}")
                     except Exception as e:
                         st.error(f"Preview error: {e}")
+    # Pipelines view disabled
+    st.caption("Pipelines view is disabled.")
+
+    # Pipelines API removed
+
+    # Disable legacy pipelines UI
+    auto_refresh = False
+    pipelines_data = None
+    # Inject auto-refresh if enabled (fixed concise interval)
+    if auto_refresh:
+        st.caption("Auto-refresh enabled")
+        st.markdown(
+            """
+            <script>
+            setTimeout(function(){
+                window.location.reload();
+            }, 8000);
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    """
+    if not pipelines_data:
+        st.caption("No pipelines currently processing.")
+    else:
+        for i, p in enumerate(pipelines_data):
+            pid = p.get("pipeline_id")
+            title = p.get("title")
+            status = p.get("status")
+            total = p.get("total_sections", 0)
+            done = p.get("sections_processed", 0)
+            pct = int((done / total) * 100) if total else 0
+
+            with st.container(border=True):
+                st.write(f"**{title}**")
+                st.caption(f"Pipeline: {pid}")
+                st.progress(min(pct, 100))
+                st.caption(f"Status: {status} | {done}/{total} sections processed")
+                # Fallback info if present
+                if p.get('model_fallback'):
+                    st.caption(f"Fallback: {p.get('model_fallback')} ({p.get('fallback_reason')})")
+                # Export from Chroma if saved
+                gen_doc_id = p.get('generated_document_id')
+                proposed_id = p.get('proposed_document_id')
+                doc_track = p.get('doc_tracking')
+                if doc_track:
+                    st.caption(f"Doc tracking: {doc_track}")
+                if gen_doc_id:
+                    gen_coll = p.get('generated_collection') or os.getenv('GENERATED_TESTPLAN_COLLECTION', 'generated_test_plan')
+                    st.caption(f"Saved: {gen_doc_id}")
+                elif proposed_id:
+                    st.caption(f"Proposed ID: {proposed_id}")
+                    if st.button("Export (Chroma)", key=f"pp_list_export_{i}"):
+                        try:
+                            payload = {"document_id": gen_doc_id, "collection_name": gen_coll}
+                            exp = requests.post(f"{FASTAPI_API}/export-testplan-word", json=payload, timeout=30)
+                            if exp.ok:
+                                data = exp.json()
+                                fname = data.get('filename', f"{title.replace(' ', '_')}.docx")
+                                import base64 as _b64
+                                blob = _b64.b64decode(data.get('content_b64') or '')
+                                st.download_button(
+                                    label=f"Download {fname}",
+                                    data=blob,
+                                    file_name=fname,
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key=f"pp_list_export_dl_{i}"
+                                )
+                            else:
+                                st.warning(f"Export failed: {exp.status_code}")
+                        except Exception as e:
+                            st.warning(f"Export error: {e}")
+                    # Controls by status
+                    if status in ("PROCESSING", "INITIALIZING"):
+                        c1, c2 = st.columns([1,1])
+                        with c1:
+                            if st.button("Abort", key=f"pp_abort_{i}"):
+                                try:
+                                    aresp = requests.post(f"{FASTAPI_API}/testplan/pipelines/{pid}/abort", params={"purge": False, "remove_generated": True}, timeout=15)
+                                    if aresp.ok:
+                                        st.success("Abort requested")
+                                        _trigger_rerun()
+                                    else:
+                                        st.warning(f"Abort failed: {aresp.status_code}")
+                                except Exception as e:
+                                    st.warning(f"Abort error: {e}")
+                        with c2:
+                            if st.button("Abort & Purge", key=f"pp_abort_purge_{i}"):
+                                try:
+                                    aresp = requests.post(f"{FASTAPI_API}/testplan/pipelines/{pid}/abort", params={"purge": True, "remove_generated": True}, timeout=20)
+                                    if aresp.ok:
+                                        st.success("Aborted and purge requested")
+                                        _trigger_rerun()
+                                    else:
+                                        st.warning(f"Abort&purge failed: {aresp.status_code}")
+                                except Exception as e:
+                                    st.warning(f"Abort&purge error: {e}")
+                    else:
+                        # For non-processing, offer purge and generated doc removal (if any)
+                        c1, c2, c3 = st.columns([1,1,1])
+                        with c1:
+                            if st.button("Purge Keys", key=f"pp_purge_{i}"):
+                                try:
+                                    presp = requests.post(f"{FASTAPI_API}/testplan/pipelines/{pid}/purge", timeout=15)
+                                    if presp.ok:
+                                        st.success("Pipeline purged")
+                                        _trigger_rerun()
+                                    else:
+                                        st.warning(f"Purge failed: {presp.status_code}")
+                                except Exception as e:
+                                    st.warning(f"Purge error: {e}")
+                        with c2:
+                            if gen_doc_id and st.button("Remove Generated Doc", key=f"pp_rm_doc_{i}"):
+                                try:
+                                    # Prefer pipeline-based convenience endpoint
+                                    rmd = requests.post(f"{FASTAPI_API}/testplan/pipelines/{pid}/remove-generated", params={"collection_name": gen_coll}, timeout=20)
+                                    if rmd.ok:
+                                        st.success("Removed generated doc")
+                                        _trigger_rerun()
+                                    else:
+                                        st.warning(f"Remove failed: {rmd.status_code}")
+                                except Exception as e:
+                                    st.warning(f"Remove error: {e}")
+                        with c3:
+                            if st.button("Cleanup (Doc + Keys)", key=f"pp_cleanup_{i}"):
+                                try:
+                                    cresp = requests.post(f"{FASTAPI_API}/testplan/pipelines/{pid}/cleanup", params={"remove_generated": True}, timeout=30)
+                                    if cresp.ok:
+                                        st.success("Cleanup completed")
+                                        _trigger_rerun()
+                                    else:
+                                        st.warning(f"Cleanup failed: {cresp.status_code}")
+                                except Exception as e:
+                                    st.warning(f"Cleanup error: {e}")
+                # Details
+                if st.button("View details", key=f"pp_view_{i}"):
+                        try:
+                            dresp = requests.get(f"{FASTAPI_API}/testplan/pipelines/{pid}", timeout=10)
+                            if dresp.ok:
+                                det = dresp.json()
+                                sections = det.get("sections", [])
+                                st.write({
+                                    "title": det.get("meta", {}).get("title"),
+                                    "status": det.get("meta", {}).get("status"),
+                                    "total_sections": det.get("meta", {}).get("total_sections"),
+                                    "sections_processed": det.get("meta", {}).get("sections_processed"),
+                                })
+                                # Fallback info if present
+                                if det.get("meta", {}).get("model_fallback"):
+                                    st.caption(
+                                        f"Fallback: {det['meta'].get('model_fallback')} ("
+                                        f"{det['meta'].get('fallback_reason')})"
+                                    )
+                                # Consistent saved ID display
+                                _meta = det.get("meta", {})
+                                _saved_id = _meta.get("generated_document_id")
+                                _saved_coll = _meta.get("collection") or os.getenv('GENERATED_TESTPLAN_COLLECTION', 'generated_test_plan')
+                                if _saved_id:
+                                    st.caption(f"Saved in Chroma: { _saved_id } ({ _saved_coll })")
+                                # Show a small table of section statuses
+                                if sections:
+                                    import pandas as pd
+                                    df = pd.DataFrame(sections)
+                                    st.dataframe(df, use_container_width=True, height=240)
+                                # If final result exists and completed, offer export
+                                final_res = det.get("final_result") or {}
+                                if final_res.get("processing_status") == "COMPLETED":
+                                    if st.button("Export DOCX", key=f"pp_export_{i}"):
+                                        try:
+                                            exp = requests.get(f"{FASTAPI_API}/export-pipeline-word/{pid}", timeout=30)
+                                            if exp.ok:
+                                                data = exp.json()
+                                                fname = data.get('filename', f"{title.replace(' ', '_')}.docx")
+                                                import base64 as _b64
+                                                blob = _b64.b64decode(data.get('content_b64') or '')
+                                                st.download_button(
+                                                    label=f"Download {fname}",
+                                                    data=blob,
+                                                    file_name=fname,
+                                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                    key=f"pp_export_dl_{i}"
+                                                )
+                                            else:
+                                                st.warning(f"Export failed: {exp.status_code}")
+                                        except Exception as e:
+                                            st.warning(f"Export error: {e}")
+                                    # If Chroma doc id recorded, offer export from Chroma and purge
+                                    meta = det.get("meta", {})
+                                    gen_doc_id = meta.get("generated_document_id")
+                                    gen_coll = meta.get("collection") or os.getenv('GENERATED_TESTPLAN_COLLECTION', 'generated_test_plan')
+                                    if gen_doc_id:
+                                        if st.button("Export from Chroma", key=f"pp_export_chroma_{i}"):
+                                            try:
+                                                payload = {"document_id": gen_doc_id, "collection_name": gen_coll}
+                                                exp = requests.post(f"{FASTAPI_API}/export-testplan-word", json=payload, timeout=30)
+                                                if exp.ok:
+                                                    data = exp.json()
+                                                    fname = data.get('filename', f"{title.replace(' ', '_')}.docx")
+                                                    import base64 as _b64
+                                                    blob = _b64.b64decode(data.get('content_b64') or '')
+                                                    st.download_button(
+                                                        label=f"Download {fname}",
+                                                        data=blob,
+                                                        file_name=fname,
+                                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                        key=f"pp_export_chroma_dl_{i}"
+                                                    )
+                                                else:
+                                                    st.warning(f"Export failed: {exp.status_code}")
+                                            except Exception as e:
+                                                    st.warning(f"Export error: {e}")
+                                        if det.get("meta", {}).get("status") in ("ABORTED", "ABORTING"):
+                                            if st.button("Delete from Chroma", key=f"pp_del_chroma_{i}"):
+                                                try:
+                                                    dresp = requests.delete(f"{FASTAPI_API}/generated-testplan/{gen_doc_id}", params={"collection_name": gen_coll}, timeout=15)
+                                                    if dresp.ok:
+                                                        st.success("Deleted from Chroma")
+                                                    else:
+                                                        st.warning(f"Delete failed: {dresp.status_code}")
+                                                except Exception as e:
+                                                    st.warning(f"Delete error: {e}")
+                            else:
+                                st.warning(f"Detail fetch failed: {dresp.status_code}")
+                        except Exception as e:
+                            st.warning(f"Failed to load details: {e}")
+
+        # Simple info section
+        st.markdown("---")
+        st.info("**Tip**: After clicking 'Generate Test Plan', your document will be created and ready for immediate download!")
+    """
+
+    # Recent Generated Test Plans panel removed
 
     # ----------------------------
     # Generate test plan
@@ -125,7 +377,14 @@ def Document_Generator():
         if not source_doc_ids:
             st.error("You must select at least one source document.")
         else:
-            # Use optimized workflow only
+            # Determine processing method
+            use_direct = None
+            if processing_method == "Direct Processing":
+                use_direct = True
+            elif processing_method == "Multi-Agent Pipeline":
+                use_direct = False
+            # Auto lets the service decide
+            
             payload = {
                 "source_collections": [source_collection],
                 "source_doc_ids": source_doc_ids,
@@ -133,9 +392,16 @@ def Document_Generator():
                 "max_workers": int(max_actor_workers),
                 "sectioning_strategy": sectioning_strategy,
                 "chunks_per_section": int(chunks_per_section),
+                "use_direct_processing": use_direct
             }
-            endpoint = "/generate_optimized_test_plan"
-            st.write("Processing with optimized Redis streaming pipeline...")
+            endpoint = "/generate"
+            
+            if processing_method == "Direct Processing":
+                st.write("Processing with direct LLM generation (fast)...")
+            elif processing_method == "Multi-Agent Pipeline":
+                st.write("Processing with multi-agent Redis pipeline (comprehensive)...")
+            else:
+                st.write("Processing with auto-selected method...")
             
             st.write("Payload:", payload)
             progress_bar = st.progress(0)
@@ -205,7 +471,5 @@ def Document_Generator():
                             st.warning("No documents were generated")
                 except Exception as e:
                     st.error("Request exception: " + str(e))
-
-        # Simple info section
-        st.markdown("---")
-        st.info("**Tip**: After clicking 'Generate Test Plan', your document will be created and ready for immediate download!")
+                    
+   

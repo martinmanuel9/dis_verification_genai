@@ -1,0 +1,3777 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "genai-sbom",
+  "documentNamespace": "urn:uuid:60c93dcf-f174-40a8-b89a-e1f79673a30e",
+  "creationInfo": {
+    "created": "2025-09-11T20:20:13Z",
+    "creators": [
+      "Tool: generate_sbom.py-1.0.0"
+    ]
+  },
+  "documentDescribes": [
+    "SPDXRef-PACKAGE-genai"
+  ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-PACKAGE-genai",
+      "name": "genai",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-accelerate",
+      "name": "accelerate",
+      "versionInfo": "1.8.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/accelerate@1.8.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-acres",
+      "name": "acres",
+      "versionInfo": "0.5.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/acres@0.5.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-aiohappyeyeballs",
+      "name": "aiohappyeyeballs",
+      "versionInfo": "2.6.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/aiohappyeyeballs@2.6.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-aiohttp",
+      "name": "aiohttp",
+      "versionInfo": "3.12.13",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/aiohttp@3.12.13"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-aiosignal",
+      "name": "aiosignal",
+      "versionInfo": "1.3.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/aiosignal@1.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-aiosqlite",
+      "name": "aiosqlite",
+      "versionInfo": "0.21.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/aiosqlite@0.21.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-altair",
+      "name": "altair",
+      "versionInfo": "5.5.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/altair@5.5.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-annotated-types",
+      "name": "annotated-types",
+      "versionInfo": "0.7.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/annotated-types@0.7.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-anyio",
+      "name": "anyio",
+      "versionInfo": "4.9.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/anyio@4.9.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-asgiref",
+      "name": "asgiref",
+      "versionInfo": "3.8.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/asgiref@3.8.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-attrs",
+      "name": "attrs",
+      "versionInfo": "25.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/attrs@25.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-azure-ai-documentintelligence",
+      "name": "azure-ai-documentintelligence",
+      "versionInfo": "1.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/azure-ai-documentintelligence@1.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-azure-core",
+      "name": "azure-core",
+      "versionInfo": "1.34.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/azure-core@1.34.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-azure-identity",
+      "name": "azure-identity",
+      "versionInfo": "1.23.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/azure-identity@1.23.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-backoff",
+      "name": "backoff",
+      "versionInfo": "2.2.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/backoff@2.2.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-banks",
+      "name": "banks",
+      "versionInfo": "2.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/banks@2.1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-bcrypt",
+      "name": "bcrypt",
+      "versionInfo": "4.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/bcrypt@4.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-beautifulsoup4",
+      "name": "beautifulsoup4",
+      "versionInfo": "4.13.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/beautifulsoup4@4.13.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-bitsandbytes",
+      "name": "bitsandbytes",
+      "versionInfo": "0.42.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/bitsandbytes@0.42.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-blinker",
+      "name": "blinker",
+      "versionInfo": "1.9.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/blinker@1.9.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-build",
+      "name": "build",
+      "versionInfo": "1.2.2.post1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/build@1.2.2.post1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-cachetools",
+      "name": "cachetools",
+      "versionInfo": "5.5.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/cachetools@5.5.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-certifi",
+      "name": "certifi",
+      "versionInfo": "2025.6.15",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/certifi@2025.6.15"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-cffi",
+      "name": "cffi",
+      "versionInfo": "1.17.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/cffi@1.17.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-charset-normalizer",
+      "name": "charset-normalizer",
+      "versionInfo": "3.4.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/charset-normalizer@3.4.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-chroma-hnswlib",
+      "name": "chroma-hnswlib",
+      "versionInfo": "0.7.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/chroma-hnswlib@0.7.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-chromadb",
+      "name": "chromadb",
+      "versionInfo": "0.6.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/chromadb@0.6.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-ci-info",
+      "name": "ci-info",
+      "versionInfo": "0.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/ci-info@0.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-click",
+      "name": "click",
+      "versionInfo": "8.2.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/click@8.2.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-cobble",
+      "name": "cobble",
+      "versionInfo": "0.1.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/cobble@0.1.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-colorama",
+      "name": "colorama",
+      "versionInfo": "0.4.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/colorama@0.4.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-coloredlogs",
+      "name": "coloredlogs",
+      "versionInfo": "15.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/coloredlogs@15.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-configobj",
+      "name": "configobj",
+      "versionInfo": "5.0.9",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/configobj@5.0.9"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-configparser",
+      "name": "configparser",
+      "versionInfo": "7.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/configparser@7.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-cryptography",
+      "name": "cryptography",
+      "versionInfo": "45.0.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/cryptography@45.0.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-dataclasses-json",
+      "name": "dataclasses-json",
+      "versionInfo": "0.6.7",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/dataclasses-json@0.6.7"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-defusedxml",
+      "name": "defusedxml",
+      "versionInfo": "0.7.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/defusedxml@0.7.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-deprecated",
+      "name": "deprecated",
+      "versionInfo": "1.2.18",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/deprecated@1.2.18"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-dirtyjson",
+      "name": "dirtyjson",
+      "versionInfo": "1.0.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/dirtyjson@1.0.8"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-distro",
+      "name": "distro",
+      "versionInfo": "1.9.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/distro@1.9.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-docx",
+      "name": "docx",
+      "versionInfo": "0.2.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/docx@0.2.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-durationpy",
+      "name": "durationpy",
+      "versionInfo": "0.10",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/durationpy@0.10"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-et-xmlfile",
+      "name": "et-xmlfile",
+      "versionInfo": "2.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/et-xmlfile@2.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-etelemetry",
+      "name": "etelemetry",
+      "versionInfo": "0.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/etelemetry@0.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-fastapi",
+      "name": "fastapi",
+      "versionInfo": "0.115.14",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/fastapi@0.115.14"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-filelock",
+      "name": "filelock",
+      "versionInfo": "3.18.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/filelock@3.18.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-filetype",
+      "name": "filetype",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/filetype@1.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-fitz",
+      "name": "fitz",
+      "versionInfo": "0.0.1.dev2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/fitz@0.0.1.dev2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-flatbuffers",
+      "name": "flatbuffers",
+      "versionInfo": "25.2.10",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/flatbuffers@25.2.10"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-fpdf",
+      "name": "fpdf",
+      "versionInfo": "1.7.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/fpdf@1.7.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-frozenlist",
+      "name": "frozenlist",
+      "versionInfo": "1.7.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/frozenlist@1.7.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-fsspec",
+      "name": "fsspec",
+      "versionInfo": "2025.5.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/fsspec@2025.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-gitdb",
+      "name": "gitdb",
+      "versionInfo": "4.0.12",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/gitdb@4.0.12"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-gitpython",
+      "name": "gitpython",
+      "versionInfo": "3.1.44",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/gitpython@3.1.44"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-google-auth",
+      "name": "google-auth",
+      "versionInfo": "2.40.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/google-auth@2.40.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-googleapis-common-protos",
+      "name": "googleapis-common-protos",
+      "versionInfo": "1.70.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/googleapis-common-protos@1.70.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-greenlet",
+      "name": "greenlet",
+      "versionInfo": "3.2.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/greenlet@3.2.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-griffe",
+      "name": "griffe",
+      "versionInfo": "1.7.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/griffe@1.7.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-grpcio",
+      "name": "grpcio",
+      "versionInfo": "1.73.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/grpcio@1.73.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-h11",
+      "name": "h11",
+      "versionInfo": "0.16.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/h11@0.16.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-httpcore",
+      "name": "httpcore",
+      "versionInfo": "1.0.9",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/httpcore@1.0.9"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-httplib2",
+      "name": "httplib2",
+      "versionInfo": "0.22.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/httplib2@0.22.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-httptools",
+      "name": "httptools",
+      "versionInfo": "0.6.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/httptools@0.6.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-httpx",
+      "name": "httpx",
+      "versionInfo": "0.28.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/httpx@0.28.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-httpx-sse",
+      "name": "httpx-sse",
+      "versionInfo": "0.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/httpx-sse@0.4.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-huggingface-hub",
+      "name": "huggingface-hub",
+      "versionInfo": "0.27.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/huggingface-hub@0.27.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-humanfriendly",
+      "name": "humanfriendly",
+      "versionInfo": "10.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/humanfriendly@10.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-idna",
+      "name": "idna",
+      "versionInfo": "3.10",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/idna@3.10"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-importlib-metadata",
+      "name": "importlib-metadata",
+      "versionInfo": "8.7.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/importlib-metadata@8.7.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-importlib-resources",
+      "name": "importlib-resources",
+      "versionInfo": "6.5.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/importlib-resources@6.5.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-iniconfig",
+      "name": "iniconfig",
+      "versionInfo": "2.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/iniconfig@2.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-isodate",
+      "name": "isodate",
+      "versionInfo": "0.7.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/isodate@0.7.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-jinja2",
+      "name": "jinja2",
+      "versionInfo": "3.1.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jinja2@3.1.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-jiter",
+      "name": "jiter",
+      "versionInfo": "0.10.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jiter@0.10.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-joblib",
+      "name": "joblib",
+      "versionInfo": "1.5.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/joblib@1.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-jsonpatch",
+      "name": "jsonpatch",
+      "versionInfo": "1.33",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jsonpatch@1.33"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-jsonpointer",
+      "name": "jsonpointer",
+      "versionInfo": "3.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jsonpointer@3.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-jsonschema",
+      "name": "jsonschema",
+      "versionInfo": "4.24.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jsonschema@4.24.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-jsonschema-specifications",
+      "name": "jsonschema-specifications",
+      "versionInfo": "2025.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jsonschema-specifications@2025.4.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-kubernetes",
+      "name": "kubernetes",
+      "versionInfo": "33.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/kubernetes@33.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain",
+      "name": "langchain",
+      "versionInfo": "0.3.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain@0.3.26"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-chroma",
+      "name": "langchain-chroma",
+      "versionInfo": "0.2.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-chroma@0.2.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-community",
+      "name": "langchain-community",
+      "versionInfo": "0.3.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-community@0.3.26"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-core",
+      "name": "langchain-core",
+      "versionInfo": "0.3.66",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-core@0.3.66"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-huggingface",
+      "name": "langchain-huggingface",
+      "versionInfo": "0.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-huggingface@0.1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-ollama",
+      "name": "langchain-ollama",
+      "versionInfo": "0.3.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-ollama@0.3.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-openai",
+      "name": "langchain-openai",
+      "versionInfo": "0.3.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-openai@0.3.26"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langchain-text-splitters",
+      "name": "langchain-text-splitters",
+      "versionInfo": "0.3.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langchain-text-splitters@0.3.8"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-langsmith",
+      "name": "langsmith",
+      "versionInfo": "0.3.45",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/langsmith@0.3.45"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-cloud",
+      "name": "llama-cloud",
+      "versionInfo": "0.1.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-cloud@0.1.26"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-cloud-services",
+      "name": "llama-cloud-services",
+      "versionInfo": "0.6.34",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-cloud-services@0.6.34"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index",
+      "name": "llama-index",
+      "versionInfo": "0.12.44",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index@0.12.44"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-agent-openai",
+      "name": "llama-index-agent-openai",
+      "versionInfo": "0.4.11",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-agent-openai@0.4.11"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-cli",
+      "name": "llama-index-cli",
+      "versionInfo": "0.4.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-cli@0.4.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-core",
+      "name": "llama-index-core",
+      "versionInfo": "0.12.44",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-core@0.12.44"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-embeddings-openai",
+      "name": "llama-index-embeddings-openai",
+      "versionInfo": "0.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-embeddings-openai@0.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-indices-managed-llama-cloud",
+      "name": "llama-index-indices-managed-llama-cloud",
+      "versionInfo": "0.7.7",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-indices-managed-llama-cloud@0.7.7"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-instrumentation",
+      "name": "llama-index-instrumentation",
+      "versionInfo": "0.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-instrumentation@0.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-llms-openai",
+      "name": "llama-index-llms-openai",
+      "versionInfo": "0.4.7",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-llms-openai@0.4.7"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-multi-modal-llms-openai",
+      "name": "llama-index-multi-modal-llms-openai",
+      "versionInfo": "0.5.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-multi-modal-llms-openai@0.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-program-openai",
+      "name": "llama-index-program-openai",
+      "versionInfo": "0.3.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-program-openai@0.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-question-gen-openai",
+      "name": "llama-index-question-gen-openai",
+      "versionInfo": "0.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-question-gen-openai@0.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-readers-file",
+      "name": "llama-index-readers-file",
+      "versionInfo": "0.4.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-readers-file@0.4.8"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-readers-llama-parse",
+      "name": "llama-index-readers-llama-parse",
+      "versionInfo": "0.4.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-readers-llama-parse@0.4.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-index-workflows",
+      "name": "llama-index-workflows",
+      "versionInfo": "1.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-index-workflows@1.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-llama-parse",
+      "name": "llama-parse",
+      "versionInfo": "0.6.34",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/llama-parse@0.6.34"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-looseversion",
+      "name": "looseversion",
+      "versionInfo": "1.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/looseversion@1.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-lxml",
+      "name": "lxml",
+      "versionInfo": "6.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/lxml@6.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-magika",
+      "name": "magika",
+      "versionInfo": "0.6.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/magika@0.6.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-mammoth",
+      "name": "mammoth",
+      "versionInfo": "1.9.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/mammoth@1.9.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-markdown",
+      "name": "markdown",
+      "versionInfo": "3.8.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/markdown@3.8.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-markdown-it-py",
+      "name": "markdown-it-py",
+      "versionInfo": "3.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/markdown-it-py@3.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-markdownify",
+      "name": "markdownify",
+      "versionInfo": "1.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/markdownify@1.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-markitdown",
+      "name": "markitdown",
+      "versionInfo": "0.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/markitdown@0.1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-markitdown-mcp",
+      "name": "markitdown-mcp",
+      "versionInfo": "0.0.1a4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/markitdown-mcp@0.0.1a4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-markupsafe",
+      "name": "markupsafe",
+      "versionInfo": "3.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/markupsafe@3.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-marshmallow",
+      "name": "marshmallow",
+      "versionInfo": "3.26.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/marshmallow@3.26.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-mcp",
+      "name": "mcp",
+      "versionInfo": "1.8.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/mcp@1.8.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-mdurl",
+      "name": "mdurl",
+      "versionInfo": "0.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/mdurl@0.1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-mmh3",
+      "name": "mmh3",
+      "versionInfo": "5.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/mmh3@5.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-mpmath",
+      "name": "mpmath",
+      "versionInfo": "1.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/mpmath@1.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-msal",
+      "name": "msal",
+      "versionInfo": "1.32.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/msal@1.32.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-msal-extensions",
+      "name": "msal-extensions",
+      "versionInfo": "1.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/msal-extensions@1.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-multidict",
+      "name": "multidict",
+      "versionInfo": "6.5.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/multidict@6.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-mypy-extensions",
+      "name": "mypy-extensions",
+      "versionInfo": "1.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/mypy-extensions@1.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-narwhals",
+      "name": "narwhals",
+      "versionInfo": "1.44.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/narwhals@1.44.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nest-asyncio",
+      "name": "nest-asyncio",
+      "versionInfo": "1.6.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nest-asyncio@1.6.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-networkx",
+      "name": "networkx",
+      "versionInfo": "3.5",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/networkx@3.5"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nibabel",
+      "name": "nibabel",
+      "versionInfo": "5.3.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nibabel@5.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nipype",
+      "name": "nipype",
+      "versionInfo": "1.10.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nipype@1.10.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nltk",
+      "name": "nltk",
+      "versionInfo": "3.9.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nltk@3.9.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-numpy",
+      "name": "numpy",
+      "versionInfo": "1.26.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/numpy@1.26.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cublas-cu12",
+      "name": "nvidia-cublas-cu12",
+      "versionInfo": "12.1.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cublas-cu12@12.1.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cuda-cupti-cu12",
+      "name": "nvidia-cuda-cupti-cu12",
+      "versionInfo": "12.1.105",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cuda-cupti-cu12@12.1.105"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cuda-nvrtc-cu12",
+      "name": "nvidia-cuda-nvrtc-cu12",
+      "versionInfo": "12.1.105",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cuda-nvrtc-cu12@12.1.105"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cuda-runtime-cu12",
+      "name": "nvidia-cuda-runtime-cu12",
+      "versionInfo": "12.1.105",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cuda-runtime-cu12@12.1.105"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cudnn-cu12",
+      "name": "nvidia-cudnn-cu12",
+      "versionInfo": "8.9.2.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cudnn-cu12@8.9.2.26"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cufft-cu12",
+      "name": "nvidia-cufft-cu12",
+      "versionInfo": "11.0.2.54",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cufft-cu12@11.0.2.54"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-curand-cu12",
+      "name": "nvidia-curand-cu12",
+      "versionInfo": "10.3.2.106",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-curand-cu12@10.3.2.106"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cusolver-cu12",
+      "name": "nvidia-cusolver-cu12",
+      "versionInfo": "11.4.5.107",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cusolver-cu12@11.4.5.107"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-cusparse-cu12",
+      "name": "nvidia-cusparse-cu12",
+      "versionInfo": "12.1.0.106",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-cusparse-cu12@12.1.0.106"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-nccl-cu12",
+      "name": "nvidia-nccl-cu12",
+      "versionInfo": "2.19.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-nccl-cu12@2.19.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-nvjitlink-cu12",
+      "name": "nvidia-nvjitlink-cu12",
+      "versionInfo": "12.9.86",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-nvjitlink-cu12@12.9.86"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-nvidia-nvtx-cu12",
+      "name": "nvidia-nvtx-cu12",
+      "versionInfo": "12.1.105",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/nvidia-nvtx-cu12@12.1.105"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-oauthlib",
+      "name": "oauthlib",
+      "versionInfo": "3.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/oauthlib@3.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-olefile",
+      "name": "olefile",
+      "versionInfo": "0.47",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/olefile@0.47"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-ollama",
+      "name": "ollama",
+      "versionInfo": "0.5.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/ollama@0.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-onnxruntime",
+      "name": "onnxruntime",
+      "versionInfo": "1.22.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/onnxruntime@1.22.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-openai",
+      "name": "openai",
+      "versionInfo": "1.92.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/openai@1.92.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opencv-python",
+      "name": "opencv-python",
+      "versionInfo": "4.11.0.86",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opencv-python@4.11.0.86"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-openpyxl",
+      "name": "openpyxl",
+      "versionInfo": "3.1.5",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/openpyxl@3.1.5"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-api",
+      "name": "opentelemetry-api",
+      "versionInfo": "1.34.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-api@1.34.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-exporter-otlp-proto-common",
+      "name": "opentelemetry-exporter-otlp-proto-common",
+      "versionInfo": "1.34.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-exporter-otlp-proto-common@1.34.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-exporter-otlp-proto-grpc",
+      "name": "opentelemetry-exporter-otlp-proto-grpc",
+      "versionInfo": "1.34.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-exporter-otlp-proto-grpc@1.34.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-instrumentation",
+      "name": "opentelemetry-instrumentation",
+      "versionInfo": "0.55b1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-instrumentation@0.55b1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-instrumentation-asgi",
+      "name": "opentelemetry-instrumentation-asgi",
+      "versionInfo": "0.55b1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-instrumentation-asgi@0.55b1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-instrumentation-fastapi",
+      "name": "opentelemetry-instrumentation-fastapi",
+      "versionInfo": "0.55b1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-instrumentation-fastapi@0.55b1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-proto",
+      "name": "opentelemetry-proto",
+      "versionInfo": "1.34.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-proto@1.34.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-sdk",
+      "name": "opentelemetry-sdk",
+      "versionInfo": "1.34.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-sdk@1.34.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-semantic-conventions",
+      "name": "opentelemetry-semantic-conventions",
+      "versionInfo": "0.55b1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-semantic-conventions@0.55b1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-opentelemetry-util-http",
+      "name": "opentelemetry-util-http",
+      "versionInfo": "0.55b1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/opentelemetry-util-http@0.55b1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-orjson",
+      "name": "orjson",
+      "versionInfo": "3.10.18",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/orjson@3.10.18"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-overrides",
+      "name": "overrides",
+      "versionInfo": "7.7.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/overrides@7.7.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-packaging",
+      "name": "packaging",
+      "versionInfo": "24.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/packaging@24.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pandas",
+      "name": "pandas",
+      "versionInfo": "2.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pandas@2.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pathlib",
+      "name": "pathlib",
+      "versionInfo": "1.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pathlib@1.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pdf2image",
+      "name": "pdf2image",
+      "versionInfo": "1.17.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pdf2image@1.17.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pdfminer-six",
+      "name": "pdfminer-six",
+      "versionInfo": "20250506",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pdfminer-six@20250506"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pillow",
+      "name": "pillow",
+      "versionInfo": "11.2.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pillow@11.2.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-platformdirs",
+      "name": "platformdirs",
+      "versionInfo": "4.3.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/platformdirs@4.3.8"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-plotly",
+      "name": "plotly",
+      "versionInfo": "6.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/plotly@6.3.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pluggy",
+      "name": "pluggy",
+      "versionInfo": "1.6.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pluggy@1.6.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-poppler-utils",
+      "name": "poppler-utils",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/poppler-utils@0.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-posthog",
+      "name": "posthog",
+      "versionInfo": "5.4.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/posthog@5.4.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-propcache",
+      "name": "propcache",
+      "versionInfo": "0.3.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/propcache@0.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-protobuf",
+      "name": "protobuf",
+      "versionInfo": "5.29.5",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/protobuf@5.29.5"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-prov",
+      "name": "prov",
+      "versionInfo": "2.1.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/prov@2.1.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-psutil",
+      "name": "psutil",
+      "versionInfo": "7.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/psutil@7.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-psycopg2-binary",
+      "name": "psycopg2-binary",
+      "versionInfo": "2.9.10",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/psycopg2-binary@2.9.10"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-puremagic",
+      "name": "puremagic",
+      "versionInfo": "1.29",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/puremagic@1.29"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyarrow",
+      "name": "pyarrow",
+      "versionInfo": "20.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyarrow@20.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyasn1",
+      "name": "pyasn1",
+      "versionInfo": "0.6.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyasn1@0.6.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyasn1-modules",
+      "name": "pyasn1-modules",
+      "versionInfo": "0.4.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyasn1-modules@0.4.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pycparser",
+      "name": "pycparser",
+      "versionInfo": "2.22",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pycparser@2.22"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pydantic",
+      "name": "pydantic",
+      "versionInfo": "2.11.7",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pydantic@2.11.7"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pydantic-core",
+      "name": "pydantic-core",
+      "versionInfo": "2.33.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pydantic-core@2.33.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pydantic-settings",
+      "name": "pydantic-settings",
+      "versionInfo": "2.10.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pydantic-settings@2.10.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pydeck",
+      "name": "pydeck",
+      "versionInfo": "0.9.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pydeck@0.9.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pydot",
+      "name": "pydot",
+      "versionInfo": "4.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pydot@4.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pydub",
+      "name": "pydub",
+      "versionInfo": "0.25.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pydub@0.25.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pygments",
+      "name": "pygments",
+      "versionInfo": "2.19.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pygments@2.19.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyjwt",
+      "name": "pyjwt",
+      "versionInfo": "2.10.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyjwt@2.10.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pymupdf",
+      "name": "pymupdf",
+      "versionInfo": "1.26.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pymupdf@1.26.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyparsing",
+      "name": "pyparsing",
+      "versionInfo": "3.2.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyparsing@3.2.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pypdf",
+      "name": "pypdf",
+      "versionInfo": "5.6.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pypdf@5.6.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pypdf2",
+      "name": "pypdf2",
+      "versionInfo": "3.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pypdf2@3.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pypika",
+      "name": "pypika",
+      "versionInfo": "0.48.9",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pypika@0.48.9"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyproject-hooks",
+      "name": "pyproject-hooks",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyproject-hooks@1.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyreadline3",
+      "name": "pyreadline3",
+      "versionInfo": "3.5.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyreadline3@3.5.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pytesseract",
+      "name": "pytesseract",
+      "versionInfo": "0.3.13",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pytesseract@0.3.13"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pytest",
+      "name": "pytest",
+      "versionInfo": "8.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pytest@8.4.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-python-dateutil",
+      "name": "python-dateutil",
+      "versionInfo": "2.9.0.post0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/python-dateutil@2.9.0.post0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-python-docx",
+      "name": "python-docx",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/python-docx@1.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-python-dotenv",
+      "name": "python-dotenv",
+      "versionInfo": "1.1.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/python-dotenv@1.1.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-python-multipart",
+      "name": "python-multipart",
+      "versionInfo": "0.0.20",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/python-multipart@0.0.20"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-python-pptx",
+      "name": "python-pptx",
+      "versionInfo": "1.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/python-pptx@1.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pytz",
+      "name": "pytz",
+      "versionInfo": "2025.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pytz@2025.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyxnat",
+      "name": "pyxnat",
+      "versionInfo": "1.6.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyxnat@1.6.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-pyyaml",
+      "name": "pyyaml",
+      "versionInfo": "6.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/pyyaml@6.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-rdflib",
+      "name": "rdflib",
+      "versionInfo": "7.1.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/rdflib@7.1.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-readability",
+      "name": "readability",
+      "versionInfo": "0.3.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/readability@0.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-redis",
+      "name": "redis",
+      "versionInfo": "6.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/redis@6.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-referencing",
+      "name": "referencing",
+      "versionInfo": "0.36.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/referencing@0.36.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-regex",
+      "name": "regex",
+      "versionInfo": "2024.11.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/regex@2024.11.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-requests",
+      "name": "requests",
+      "versionInfo": "2.32.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/requests@2.32.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-requests-oauthlib",
+      "name": "requests-oauthlib",
+      "versionInfo": "2.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/requests-oauthlib@2.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-requests-toolbelt",
+      "name": "requests-toolbelt",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/requests-toolbelt@1.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-rich",
+      "name": "rich",
+      "versionInfo": "14.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/rich@14.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-rpds-py",
+      "name": "rpds-py",
+      "versionInfo": "0.25.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/rpds-py@0.25.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-rsa",
+      "name": "rsa",
+      "versionInfo": "4.9.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/rsa@4.9.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-safetensors",
+      "name": "safetensors",
+      "versionInfo": "0.5.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/safetensors@0.5.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-scikit-learn",
+      "name": "scikit-learn",
+      "versionInfo": "1.7.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/scikit-learn@1.7.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-scipy",
+      "name": "scipy",
+      "versionInfo": "1.16.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/scipy@1.16.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-sentence-transformers",
+      "name": "sentence-transformers",
+      "versionInfo": "3.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/sentence-transformers@3.4.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-setuptools",
+      "name": "setuptools",
+      "versionInfo": "80.9.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/setuptools@80.9.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-shellingham",
+      "name": "shellingham",
+      "versionInfo": "1.5.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/shellingham@1.5.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-simplejson",
+      "name": "simplejson",
+      "versionInfo": "3.20.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/simplejson@3.20.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-six",
+      "name": "six",
+      "versionInfo": "1.17.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/six@1.17.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-smmap",
+      "name": "smmap",
+      "versionInfo": "5.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/smmap@5.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-sniffio",
+      "name": "sniffio",
+      "versionInfo": "1.3.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/sniffio@1.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-soupsieve",
+      "name": "soupsieve",
+      "versionInfo": "2.7",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/soupsieve@2.7"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-speechrecognition",
+      "name": "speechrecognition",
+      "versionInfo": "3.14.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/speechrecognition@3.14.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-sqlalchemy",
+      "name": "sqlalchemy",
+      "versionInfo": "2.0.41",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/sqlalchemy@2.0.41"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-sse-starlette",
+      "name": "sse-starlette",
+      "versionInfo": "2.3.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/sse-starlette@2.3.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-starlette",
+      "name": "starlette",
+      "versionInfo": "0.46.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/starlette@0.46.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-streamlit",
+      "name": "streamlit",
+      "versionInfo": "1.46.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/streamlit@1.46.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-striprtf",
+      "name": "striprtf",
+      "versionInfo": "0.0.26",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/striprtf@0.0.26"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-sympy",
+      "name": "sympy",
+      "versionInfo": "1.14.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/sympy@1.14.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-tenacity",
+      "name": "tenacity",
+      "versionInfo": "9.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/tenacity@9.1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-threadpoolctl",
+      "name": "threadpoolctl",
+      "versionInfo": "3.6.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/threadpoolctl@3.6.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-tiktoken",
+      "name": "tiktoken",
+      "versionInfo": "0.8.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/tiktoken@0.8.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-tokenizers",
+      "name": "tokenizers",
+      "versionInfo": "0.21.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/tokenizers@0.21.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-toml",
+      "name": "toml",
+      "versionInfo": "0.10.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/toml@0.10.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-torch",
+      "name": "torch",
+      "versionInfo": "2.2.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/torch@2.2.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-tornado",
+      "name": "tornado",
+      "versionInfo": "6.5.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/tornado@6.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-tqdm",
+      "name": "tqdm",
+      "versionInfo": "4.67.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/tqdm@4.67.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-traits",
+      "name": "traits",
+      "versionInfo": "7.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/traits@7.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-transformers",
+      "name": "transformers",
+      "versionInfo": "4.50.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/transformers@4.50.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-triton",
+      "name": "triton",
+      "versionInfo": "2.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/triton@2.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-typer",
+      "name": "typer",
+      "versionInfo": "0.16.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/typer@0.16.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-typing-extensions",
+      "name": "typing-extensions",
+      "versionInfo": "4.14.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/typing-extensions@4.14.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-typing-inspect",
+      "name": "typing-inspect",
+      "versionInfo": "0.9.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/typing-inspect@0.9.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-typing-inspection",
+      "name": "typing-inspection",
+      "versionInfo": "0.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/typing-inspection@0.4.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-tzdata",
+      "name": "tzdata",
+      "versionInfo": "2025.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/tzdata@2025.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-urllib3",
+      "name": "urllib3",
+      "versionInfo": "2.5.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/urllib3@2.5.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-uvicorn",
+      "name": "uvicorn",
+      "versionInfo": "0.34.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/uvicorn@0.34.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-uvloop",
+      "name": "uvloop",
+      "versionInfo": "0.21.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/uvloop@0.21.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-watchdog",
+      "name": "watchdog",
+      "versionInfo": "6.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/watchdog@6.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-watchfiles",
+      "name": "watchfiles",
+      "versionInfo": "1.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/watchfiles@1.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-websocket-client",
+      "name": "websocket-client",
+      "versionInfo": "1.8.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/websocket-client@1.8.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-websockets",
+      "name": "websockets",
+      "versionInfo": "15.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/websockets@15.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-wrapt",
+      "name": "wrapt",
+      "versionInfo": "1.17.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/wrapt@1.17.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-xlrd",
+      "name": "xlrd",
+      "versionInfo": "2.0.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/xlrd@2.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-xlsxwriter",
+      "name": "xlsxwriter",
+      "versionInfo": "3.2.5",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/xlsxwriter@3.2.5"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-yarl",
+      "name": "yarl",
+      "versionInfo": "1.20.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/yarl@1.20.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-youtube-transcript-api",
+      "name": "youtube-transcript-api",
+      "versionInfo": "1.0.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/youtube-transcript-api@1.0.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-zipp",
+      "name": "zipp",
+      "versionInfo": "3.23.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/zipp@3.23.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-PACKAGE-zstandard",
+      "name": "zstandard",
+      "versionInfo": "0.23.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/zstandard@0.23.0"
+        }
+      ]
+    }
+  ]
+}

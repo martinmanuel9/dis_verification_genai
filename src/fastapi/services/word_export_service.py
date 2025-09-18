@@ -345,7 +345,13 @@ class WordExportService:
             raise e
     
     def export_reconstructed_document_to_word(self, reconstructed: Dict[str, Any]) -> bytes:
-        """Export a reconstructed document (text + optional images) to a Word document."""
+        """Export a reconstructed document (text + optional images) to a Word document.
+
+        Supports two image syntaxes:
+        - Markdown inline: ![alt](url)
+        - Marker inline: [IMAGE:filename]
+        Remaining images from the `images` list are appended in an Images section.
+        """
         try:
             doc = Document()
             self._setup_document_styles(doc)
@@ -354,37 +360,107 @@ class WordExportService:
             title = doc.add_heading(title_text, 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Render reconstructed content with simple markdown-like handling
+            # Render reconstructed content with simple markdown-like handling + [IMAGE:filename]
+            import re, tempfile, requests
+            from docx.shared import Inches
+            CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8020")
             content = reconstructed.get('reconstructed_content', '') or ''
-            for line in content.splitlines():
-                l = (line or '').strip()
-                if not l:
-                    doc.add_paragraph("")
-                    continue
-                if l.startswith('### '):
-                    doc.add_heading(l[4:].strip(), level=3)
-                elif l.startswith('## '):
-                    doc.add_heading(l[3:].strip(), level=2)
-                elif l.startswith('# '):
-                    doc.add_heading(l[2:].strip(), level=1)
-                elif l.startswith(('-', '*', '•')):
-                    doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
-                else:
-                    doc.add_paragraph(l)
 
-            # Optional: embed images
+            # Regex patterns
+            md_img_pattern = re.compile(r"!\[(?P<alt>.*?)\]\((?P<url>[^\s)]+)\)")
+            marker_pattern = re.compile(r"\[IMAGE:(?P<fn>[^\]]+)\]")
+
+            # Split content preserving image markers so we can inline them
+            tokens = re.split(r"(\[IMAGE:[^\]]+\])", content)
+
+            # Track inlined filenames to avoid duplication later
+            inlined_filenames = set()
+
+            def _render_text_block(text_block: str):
+                for line in (text_block or '').splitlines():
+                    l = (line or '').strip()
+                    if not l:
+                        doc.add_paragraph("")
+                        continue
+
+                    # Inline markdown image handling
+                    m = md_img_pattern.match(l)
+                    if m:
+                        url = m.group('url')
+                        alt = (m.group('alt') or '').strip()
+                        try:
+                            resp = requests.get(url, timeout=15)
+                            if resp.ok:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
+                                    tf.write(resp.content)
+                                    tp = tf.name
+                                doc.add_picture(tp, width=Inches(5.5))
+                                if alt:
+                                    para = doc.add_paragraph(alt)
+                                    para.style = 'Quote'
+                                os.unlink(tp)
+                            else:
+                                doc.add_paragraph(f"[Image not available: {alt or url}]")
+                        except Exception as e:
+                            doc.add_paragraph(f"[Failed to load image: {e}]")
+                        continue
+
+                    if l.startswith('### '):
+                        doc.add_heading(l[4:].strip(), level=3)
+                    elif l.startswith('## '):
+                        doc.add_heading(l[3:].strip(), level=2)
+                    elif l.startswith('# '):
+                        doc.add_heading(l[2:].strip(), level=1)
+                    elif l.startswith(('-', '*', '•')):
+                        doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
+                    else:
+                        doc.add_paragraph(l)
+
+            for tok in tokens:
+                if not tok:
+                    continue
+                mm = marker_pattern.fullmatch(tok.strip())
+                if mm:
+                    filename = mm.group('fn').strip()
+                    if filename:
+                        try:
+                            resp = requests.get(f"{CHROMA_URL}/images/{filename}", timeout=15)
+                            if resp.ok:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
+                                    tf.write(resp.content)
+                                    temp_path = tf.name
+                                doc.add_picture(temp_path, width=Inches(5.5))
+                                os.unlink(temp_path)
+                                inlined_filenames.add(filename)
+                            else:
+                                doc.add_paragraph(f"[Image '{filename}' not available]")
+                        except Exception as e:
+                            doc.add_paragraph(f"[Failed to load image '{filename}': {e}]")
+                    continue
+                else:
+                    _render_text_block(tok)
+
+            # Optional: append remaining images that may not be inlined
             images = reconstructed.get('images') or []
+            remaining = []
             if images:
+                # Add also markdown images embedded via /images/ URL
+                for l in (content or '').splitlines():
+                    m = md_img_pattern.match(l.strip())
+                    if m and '/images/' in m.group('url'):
+                        inlined_filenames.add(m.group('url').split('/images/')[-1])
+                for img in images:
+                    fn = img.get('filename')
+                    if fn and fn not in inlined_filenames:
+                        remaining.append(img)
+
+            if remaining:
                 doc.add_page_break()
                 doc.add_heading('Images', level=1)
-                CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8020")
-                import tempfile
-                from docx.shared import Inches
-                for idx, img in enumerate(images, 1):
+                for img in remaining:
                     filename = img.get('filename')
                     desc = img.get('description') or ''
                     try:
-                        import requests
                         resp = requests.get(f"{CHROMA_URL}/images/{filename}", timeout=15)
                         if resp.ok:
                             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
@@ -455,6 +531,75 @@ class WordExportService:
             return self._document_to_bytes(doc)
         except Exception as e:
             logger.error(f"Failed to export markdown to Word: {str(e)}")
+            raise e
+
+    def export_markdown_with_images_to_word(self, title: str, markdown_content: str, image_filenames: List[str]) -> bytes:
+        """Export markdown-like content to Word and append an Images section by filenames served by Chroma."""
+        try:
+            from docx.shared import Inches
+            import tempfile
+            import requests
+
+            doc = Document()
+            self._setup_document_styles(doc)
+
+            # Title
+            if title:
+                t = doc.add_heading(title, 0)
+                t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Body content
+            for line in (markdown_content or '').splitlines():
+                l = (line or '').strip()
+                if not l:
+                    doc.add_paragraph("")
+                    continue
+                if l.startswith('### '):
+                    doc.add_heading(l[4:].strip(), level=3)
+                elif l.startswith('## '):
+                    doc.add_heading(l[3:].strip(), level=2)
+                elif l.startswith('# '):
+                    doc.add_heading(l[2:].strip(), level=1)
+                elif l.startswith(('-', '*', '•')):
+                    doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
+                elif l[:2].isdigit() and len(l) > 2 and l[2] in ('.', ')'):
+                    doc.add_paragraph(l, style='List Number')
+                else:
+                    # Handle inline bold via **text**
+                    if '**' in l:
+                        parts = l.split('**')
+                        p = doc.add_paragraph()
+                        bold = False
+                        for part in parts:
+                            run = p.add_run(part)
+                            if bold:
+                                run.bold = True
+                            bold = not bold
+                    else:
+                        doc.add_paragraph(l)
+
+            # Append images if provided
+            if image_filenames:
+                CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8020")
+                doc.add_page_break()
+                doc.add_heading('Images', level=1)
+                for filename in image_filenames:
+                    try:
+                        resp = requests.get(f"{CHROMA_URL}/images/{filename}", timeout=15)
+                        if resp.ok:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
+                                tf.write(resp.content)
+                                temp_path = tf.name
+                            doc.add_picture(temp_path, width=Inches(5.5))
+                            os.unlink(temp_path)
+                        else:
+                            doc.add_paragraph(f"[Image '{filename}' not available]")
+                    except Exception as e:
+                        doc.add_paragraph(f"[Failed to load image '{filename}': {e}]")
+
+            return self._document_to_bytes(doc)
+        except Exception as e:
+            logger.error(f"Failed to export markdown with images to Word: {str(e)}")
             raise e
     
     def _setup_document_styles(self, doc: Document):

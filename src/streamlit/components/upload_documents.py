@@ -117,7 +117,7 @@ def view_images(key_prefix: str = "",):
                     # ---- EXPORT DOCUMENTS ----
                     with st.expander("Export Document"):
                         # Use centralized FastAPI word_export_service for Word export
-                        if st.button("Export to Word", key=pref("export_reconstructed_word")):
+                        if st.button("Export to Word (inline content)", key=pref("export_reconstructed_word")):
                             try:
                                 with st.spinner("Generating Word document…"):
                                     export_resp = requests.post(
@@ -138,6 +138,37 @@ def view_images(key_prefix: str = "",):
                                             file_name=filename,
                                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                             key=pref("download_reconstructed_word")
+                                        )
+                                        st.success("Word document ready!")
+                                    else:
+                                        st.error("No file returned from export service.")
+                                else:
+                                    st.error(f"Export failed: {export_resp.status_code} {export_resp.text}")
+                            except Exception as e:
+                                st.error(f"Error exporting Word: {e}")
+
+                        # Alternate: server-side reconstruct by ID then export
+                        if st.button("Export to Word (reconstruct by ID)", key=pref("export_reconstructed_word_by_id")):
+                            try:
+                                with st.spinner("Reconstructing and exporting…"):
+                                    payload = {"collection_name": reconstruct_collection, "document_id": result.get("document_id")}
+                                    export_resp = requests.post(
+                                        f"{FASTAPI_API}/export-reconstructed-word-by-id",
+                                        json=payload,
+                                        timeout=60
+                                    )
+                                if export_resp.ok:
+                                    data = export_resp.json()
+                                    b64 = data.get("content_b64")
+                                    filename = data.get("filename", f"{result['document_name']}.docx")
+                                    if b64:
+                                        import base64
+                                        st.download_button(
+                                            label=f"Download {filename}",
+                                            data=base64.b64decode(b64),
+                                            file_name=filename,
+                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            key=pref("download_reconstructed_word_by_id")
                                         )
                                         st.success("Word document ready!")
                                     else:

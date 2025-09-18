@@ -704,14 +704,16 @@ class DocumentService:
         return "\n\n".join(text_parts)
     
     def _save_to_vector_store(self, title: str, content: str, template_collection: str, 
-                            agent_ids: List[int], session_id: str) -> Dict[str, Any]:
+                            agent_ids: Optional[List[int]], session_id: str,
+                            extra_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Save generated document to ChromaDB vector store"""
         try:
             from datetime import datetime
             import json
             
             # Create a collection name for generated documents
-            generated_collection = "generated_documents"
+            import os
+            generated_collection = os.getenv("GENERATED_TESTPLAN_COLLECTION", "generated_test_plan")
             
             # First, ensure the collection exists
             try:
@@ -752,12 +754,23 @@ class DocumentService:
                 "title": title,
                 "type": "generated_document",
                 "template_collection": template_collection,
-                "agent_ids": json.dumps(agent_ids),
+                "agent_ids": json.dumps(agent_ids or []),
                 "session_id": session_id,
                 "generated_at": datetime.now().isoformat(),
                 "word_count": len(content.split()),
                 "char_count": len(content)
             }
+            # Merge extra metadata if provided (e.g., source docs, images)
+            if extra_metadata:
+                try:
+                    for k, v in extra_metadata.items():
+                        # Ensure JSON-serializable primitives or strings
+                        if isinstance(v, (str, int, float, bool)):
+                            metadata[k] = v
+                        else:
+                            metadata[k] = json.dumps(v)
+                except Exception as _:
+                    pass
             
             # Store in ChromaDB via API
             payload = {
@@ -905,6 +918,7 @@ class DocumentService:
             
             # Use document reconstruction to get original document structure
             test_plan_content = ""
+            aggregated_images: list[str] = []
             
             for collection in source_collections:
                 for doc_id in source_doc_ids:
@@ -925,6 +939,15 @@ class DocumentService:
                         reconstruction_data = response.json()
                         full_content = reconstruction_data.get("reconstructed_content", "")
                         doc_name = reconstruction_data.get("document_name", doc_id)
+                        # Collect image filenames for export inclusion
+                        try:
+                            imgs = reconstruction_data.get("images") or []
+                            for img in imgs:
+                                fn = (img or {}).get("filename")
+                                if fn and fn not in aggregated_images:
+                                    aggregated_images.append(fn)
+                        except Exception:
+                            pass
                         
                         if not full_content:
                             print(f"WARNING: Empty content for {doc_id}")
@@ -962,19 +985,26 @@ class DocumentService:
             # Save to vector store
             doc_text = self._extract_text_from_docx_object(doc)
             doc_session_id = str(uuid.uuid4())
+            # Carry source references and images in metadata for later export
+            extra_meta = {
+                "source_collections": source_collections or [],
+                "source_doc_ids": source_doc_ids or [],
+                "source_images": aggregated_images,
+            }
             generated_doc_info = self._save_to_vector_store(
                 title=doc_title,
                 content=doc_text, 
                 template_collection="Test_Plans",
                 agent_ids=None,
-                session_id=doc_session_id
+                session_id=doc_session_id,
+                extra_metadata=extra_meta
             )
             
             return [{
                 "title": doc_title,
                 "docx_b64": base64.b64encode(buf.getvalue()).decode("utf-8"),
                 "document_id": generated_doc_info.get("document_id"),
-                "collection_name": "Test_Plans",
+                "collection_name": generated_doc_info.get("collection_name"),
                 "processing_status": "COMPLETED",
                 "meta": {
                     "architecture": "document_reconstruction_with_requirements_filtering",
@@ -1271,7 +1301,12 @@ Generate the procedures now:"""
             return [f"**Test Procedure {start_counter}:** Error generating - {str(e)[:50]}"]
     
     def _add_text_to_docx(self, text_content: str, doc: Document):
-        """Add text content to Word document with proper formatting"""
+        """Add text content to Word document with proper formatting.
+
+        Styling tweaks per requirements:
+        - Make the "Test Procedure N:" label bold + underlined
+        - Render the bullet label for steps as "Test Steps:" (bold + underlined)
+        """
         import re
         lines = text_content.split('\n')
         
@@ -1301,23 +1336,55 @@ Generate the procedures now:"""
             elif line_clean.startswith('#### '):
                 doc.add_heading(line_clean[5:], level=4)
                 
-            # Handle test procedures as bold headings
-            elif line_clean.startswith('**Test Procedure'):
-                # Extract the test procedure text and make it a proper heading
-                test_proc_text = line_clean.replace('**', '').strip()
-                doc.add_heading(test_proc_text, level=4)
+            # Handle test procedures: bold + underline the "Test Procedure N:" label
+            elif line_clean.startswith('**Test Procedure') or line_clean.startswith('Test Procedure'):
+                # Normalize and extract number + title
+                normalized = line_clean.replace('**', '').strip()
+                # Expected formats:
+                #   "Test Procedure 1: Title" or "Test Procedure 1:" or similar
+                m = re.match(r'^Test\s+Procedure\s+(?P<num>\d+)\s*:\s*(?P<title>.*)$', normalized)
+                if m:
+                    num = m.group('num')
+                    title = m.group('title')
+                    p = doc.add_paragraph()
+                    p.style = doc.styles['Heading 4'] if 'Heading 4' in [s.name for s in doc.styles] else None
+                    run_label = p.add_run(f"Test Procedure {num}:")
+                    run_label.bold = True
+                    run_label.underline = True
+                    if title:
+                        p.add_run(f" {title}")
+                else:
+                    # Fallback: add as heading but underline full label
+                    p = doc.add_paragraph()
+                    p.style = doc.styles['Heading 4'] if 'Heading 4' in [s.name for s in doc.styles] else None
+                    run_label = p.add_run(normalized)
+                    run_label.bold = True
+                    run_label.underline = True
                 
             # Handle bullet points with bold elements
             elif line_clean.startswith('• **') and ':**' in line_clean:
                 # Format like "• **Requirement:** text" as bullet with bold label
                 parts = line_clean.split(':**', 1)
                 if len(parts) == 2:
-                    label = parts[0].replace('• **', '').strip()
-                    content = parts[1].strip()
-                    para = doc.add_paragraph(style='List Bullet')
-                    run = para.add_run(f"{label}: ")
-                    run.bold = True
-                    para.add_run(content)
+                    raw_label = parts[0].replace('• **', '').strip()
+                    # Normalize label and apply special styling for steps
+                    label_cmp = raw_label.lower()
+                    if label_cmp in ("steps", "test steps"):
+                        label = "Test Steps"
+                        para = doc.add_paragraph(style='List Bullet')
+                        run = para.add_run(f"{label}:")
+                        run.bold = True
+                        run.underline = True
+                        content = parts[1].strip()
+                        if content:
+                            para.add_run(f" {content}")
+                    else:
+                        label = raw_label
+                        content = parts[1].strip()
+                        para = doc.add_paragraph(style='List Bullet')
+                        run = para.add_run(f"{label}: ")
+                        run.bold = True
+                        para.add_run(content)
                 else:
                     doc.add_paragraph(line_clean, style='List Bullet')
             

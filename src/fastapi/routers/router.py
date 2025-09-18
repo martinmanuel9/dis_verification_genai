@@ -1,5 +1,6 @@
 import uuid
 import os
+import json
 import requests
 from typing import List, Dict, Optional, Tuple, Any
 from sqlalchemy.orm import Session
@@ -887,7 +888,24 @@ async def generate_document(req: DocumentGenerationRequest):
             req.doc_title,
             req.use_direct_processing
         )
-        return {"documents": docs}
+        # Normalize response for download UX: include filename/content_b64/content_type
+        enriched = []
+        for d in (docs or []):
+            try:
+                title = (d.get("title") or req.doc_title or "Generated Document").strip()
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '_', '-')).strip() or "generated_document"
+                filename = f"{safe_title}_{ts}.docx"
+                content_b64 = d.get("content_b64") or d.get("docx_b64")
+                enriched.append({
+                    **d,
+                    "filename": filename,
+                    "content_b64": content_b64,
+                    "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                })
+            except Exception:
+                enriched.append(d)
+        return {"documents": enriched}
     except Exception as e:
         logger.error(f"Error in document generation: {e}")
         raise HTTPException(status_code=500, detail=f"Document generation failed: {str(e)}")
@@ -1054,10 +1072,26 @@ async def export_testplan_word(payload: Dict[str, Any]):
             raise HTTPException(status_code=404, detail="Document not found in collection")
 
         content = docs[idx] or ""
-        title = (metas[idx] or {}).get("title") or "Generated Test Plan"
+        meta = (metas[idx] or {})
+        title = meta.get("title") or "Generated Test Plan"
 
-        # Export using WordExportService
-        word_bytes = word_export_service.export_markdown_to_word(title, content)
+        # If we have source images from generation metadata, include them in export
+        source_images = []
+        try:
+            if meta.get("source_images"):
+                # May be JSON list or string
+                val = meta.get("source_images")
+                if isinstance(val, str):
+                    source_images = json.loads(val)
+                elif isinstance(val, list):
+                    source_images = val
+        except Exception:
+            source_images = []
+
+        if source_images:
+            word_bytes = word_export_service.export_markdown_with_images_to_word(title, content, source_images)
+        else:
+            word_bytes = word_export_service.export_markdown_to_word(title, content)
         b64 = base64.b64encode(word_bytes).decode("utf-8")
         filename = f"{title.replace(' ', '_')}.docx"
         return {"filename": filename, "content_b64": b64}
@@ -1551,6 +1585,45 @@ async def export_reconstructed_document_to_word(reconstructed: Dict[str, Any]):
         }
     except Exception as e:
         logger.error(f"Failed to export reconstructed document to Word: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@router.post("/export-reconstructed-word-by-id")
+async def export_reconstructed_document_by_id(payload: Dict[str, Any]):
+    """Convenience endpoint: reconstruct by { collection_name, document_id } and return DOCX (base64)."""
+    try:
+        collection_name = payload.get("collection_name")
+        document_id = payload.get("document_id")
+        if not collection_name or not document_id:
+            raise HTTPException(status_code=400, detail="collection_name and document_id are required")
+
+        chroma_url = os.getenv("CHROMA_URL", "http://localhost:8020")
+        resp = requests.get(
+            f"{chroma_url}/documents/reconstruct/{document_id}",
+            params={"collection_name": collection_name},
+            timeout=60
+        )
+        if not resp.ok:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+        reconstructed = resp.json()
+        word_bytes = word_export_service.export_reconstructed_document_to_word(reconstructed)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = reconstructed.get('document_name') or 'reconstructed_document'
+        safe_base = "".join(c for c in base if c.isalnum() or c in (' ', '_', '-')).strip() or 'reconstructed_document'
+        filename = f"{safe_base}_{timestamp}.docx"
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+        return {
+            "filename": filename,
+            "content_b64": word_b64,
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "collection_name": collection_name,
+            "document_id": document_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export reconstructed by id: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 @router.get("/export-word-demo")

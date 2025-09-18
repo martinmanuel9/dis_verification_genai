@@ -612,6 +612,54 @@ def extract_text_by_page(file_content: bytes, filename: str, temp_dir: str) -> L
         logger.error(f"Error extracting text by page from {filename}: {e}")
     return texts
 
+def detect_headers_and_footers(page_texts: List[Dict], top_n: int = 3, bottom_n: int = 3, min_ratio: float = 0.5) -> Dict[str, List[str]]:
+    """Detect repeated header/footer lines across pages by simple frequency.
+
+    Returns dict with 'headers' and 'footers' lists. Lines are trimmed and case-normalized.
+    """
+    try:
+        from collections import Counter
+        total = max(1, len(page_texts))
+        header_counter = Counter()
+        footer_counter = Counter()
+
+        def norm(line: str) -> str:
+            return (line or "").strip()
+
+        for p in page_texts:
+            lines = [ln for ln in (p.get("text") or "").split('\n') if ln.strip()]
+            if not lines:
+                continue
+            # Top N
+            for ln in lines[:top_n]:
+                header_counter[norm(ln)] += 1
+            # Bottom N
+            for ln in lines[-bottom_n:]:
+                footer_counter[norm(ln)] += 1
+
+        threshold = int(min_ratio * total)
+        headers = [ln for ln, c in header_counter.items() if c >= threshold and ln]
+        footers = [ln for ln, c in footer_counter.items() if c >= threshold and ln]
+        return {"headers": headers, "footers": footers}
+    except Exception:
+        return {"headers": [], "footers": []}
+
+def remove_headers_footers_from_pages(page_texts: List[Dict], headers: List[str], footers: List[str]) -> Dict[int, str]:
+    """Return page -> cleaned_text map with detected header/footer lines removed."""
+    cleaned = {}
+    hs = set((ln or "").strip() for ln in headers)
+    fs = set((ln or "").strip() for ln in footers)
+    for p in page_texts:
+        pg = p.get("page")
+        lines = (p.get("text") or "").split('\n')
+        kept = []
+        for ln in lines:
+            t = (ln or "").strip()
+            if t and t not in hs and t not in fs:
+                kept.append(ln)
+        cleaned[pg] = '\n'.join(kept)
+    return cleaned
+
 def detect_section_title_from_page_text(text: str) -> str:
     """Heuristic to detect a section title near the top of a page."""
     try:
@@ -1270,7 +1318,13 @@ def run_ingest_job(
                 if use_page_chunking:
                     # Extract page texts and correlate with images
                     page_texts = extract_text_by_page(content, fname, tmp_dir)
-                    page_text_map = {p["page"]: (p.get("text") or "") for p in page_texts}
+                    # Auto-detect and remove headers/footers
+                    hf = detect_headers_and_footers(page_texts, top_n=3, bottom_n=3, min_ratio=0.5)
+                    page_text_map = remove_headers_footers_from_pages(
+                        page_texts,
+                        hf.get("headers", []),
+                        hf.get("footers", []),
+                    )
 
                     chunks = []
                     for page in pages_data:
@@ -1301,6 +1355,15 @@ def run_ingest_job(
                         # Ensure we have some minimal content to embed
                         if not (pg_text or "").strip():
                             pg_text = f"Page {pg}: [no extractable text]"
+
+                        # Append image markers so reconstruction can inline images later
+                        if img_list:
+                            try:
+                                markers = "\n\n".join([f"[IMAGE:{img['filename']}]" for img in img_list if img.get('filename')])
+                                if markers:
+                                    pg_text = (pg_text or "").rstrip() + "\n\n" + markers
+                            except Exception:
+                                pass
                         chunks.append({
                             "content": pg_text.strip(),
                             "chunk_index": max(0, int(pg) - 1),
@@ -1310,6 +1373,7 @@ def run_ingest_job(
                             "section_title": "",
                             "has_images": len(img_list) > 0,
                             "ocr_used": page_ocr_used,
+                            "header_footer_removed": bool(hf.get("headers") or hf.get("footers")),
                             "start_position": 0,
                             "end_position": len(pg_text or ""),
                         })
@@ -1378,6 +1442,8 @@ def run_ingest_job(
                             "section_title": c.get("section_title", ""),
                             "section_type": c.get("section_type", "chunk"),
                             "page_number": c.get("page_number", -1),  # Use -1 instead of None
+                            # Back-compat mirror to match chromadb.ipynb which reads 'page'
+                            "page": c.get("page_number", -1),
                             "section_number": c.get("section_number", -1),  # Use -1 instead of None
                             "has_images": c.get("has_images", False),
                             "image_count": len(c.get("images", [])),
@@ -1394,6 +1460,8 @@ def run_ingest_job(
                         meta["image_filenames"]     = json.dumps(filenames)
                         meta["image_storage_paths"] = json.dumps(paths)
                         meta["image_descriptions"]  = json.dumps(descs)
+                        # Back-compat alias used in the notebook examples
+                        meta["image_files"]         = json.dumps(paths)
                         # Derive which vision models were used from description prefixes
                         models_used = set()
                         for d in descs:
@@ -1414,6 +1482,10 @@ def run_ingest_job(
                         meta["openai_api_used"] = ("openai" in models_used)
                         meta["ocr_used"] = bool(c.get("ocr_used", False))
                         
+                        # Annotate header/footer cleanup if present on chunk_data
+                        if c.get("header_footer_removed"):
+                            meta["header_footer_removed"] = True
+
                         # Validate metadata to ensure ChromaDB compatibility (no None values)
                         validated_meta = {}
                         for key, value in meta.items():
@@ -2004,6 +2076,8 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
         last_section_title = None
         last_page_number = None
 
+        base_img_url = os.getenv("CHROMA_PUBLIC_URL", "http://localhost:8020")
+
         for chunk in chunks_data:
             md = chunk["metadata"]
             content = chunk["content"] or ""
@@ -2044,11 +2118,9 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
                     image_descriptions = json.loads(md.get("image_descriptions", "[]"))
 
                     for filename, path, desc in zip(image_filenames, image_paths, image_descriptions):
-                        markdown_img = (
-                            f"\n\n[Image {image_counter}]:\n"
-                            f"# Description:\n"
-                            f"{(desc or '').strip()}\n"
-                        )
+                        # Insert a markdown image at the marker location for inline rendering
+                        alt_text = (desc or filename).strip()
+                        markdown_img = f"![{alt_text}]({base_img_url}/images/{filename})"
                         marker = f"[IMAGE:{filename}]"
                         content = content.replace(marker, markdown_img)
 

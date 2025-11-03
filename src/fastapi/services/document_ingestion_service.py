@@ -1110,7 +1110,146 @@ def process_document_with_context_multi_model(file_content: bytes,
         "images_data": images_data,
         "file_type": file_extension
     }
-    
+
+
+
+def create_chunks_with_position_support(
+    ext: str,
+    pages_data: List[Dict],
+    fname: str,
+    content: bytes,
+    tmp_dir: str,
+    openai_api_key: Optional[str],
+    vision_models: List[str],
+    chunk_size: int,
+    chunk_overlap: int,
+    enable_ocr: bool,
+    use_positions: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Create chunks with optional position preservation.
+
+    For PDFs with position-aware extraction enabled, uses position-aware chunking.
+    Otherwise, falls back to legacy chunking logic.
+
+    Args:
+        ext: File extension (.pdf, .docx, etc.)
+        pages_data: Page data from extraction (with or without positions)
+        fname: Filename
+        content: File content bytes
+        tmp_dir: Temporary directory
+        openai_api_key: OpenAI API key
+        vision_models: List of vision models to use
+        chunk_size: Chunk size for text splitting
+        chunk_overlap: Chunk overlap for text splitting
+        enable_ocr: Whether OCR is enabled
+        use_positions: Whether to use position-aware chunking
+
+    Returns:
+        List of chunk dictionaries
+    """
+    # Check if we should use position-aware chunking
+    if use_positions and USE_POSITION_AWARE and ext == ".pdf":
+        logger.info(f"Using position-aware chunking for {fname}")
+        try:
+            # Use position-aware chunking from the new module
+            chunks = page_based_chunking_with_positions(
+                pages_data=pages_data,
+                document_name=fname
+            )
+            logger.info(f"Position-aware chunking created {len(chunks)} chunks for {fname}")
+            return chunks
+        except Exception as e:
+            logger.error(f"Position-aware chunking failed for {fname}, falling back to legacy: {e}")
+            # Fall through to legacy chunking
+
+    # Legacy chunking logic
+    logger.info(f"Using legacy chunking for {fname}")
+
+    use_page_chunking = True if ext == ".pdf" else False
+
+    if use_page_chunking:
+        # Extract page texts and correlate with images
+        page_texts = extract_text_by_page(content, fname, tmp_dir)
+        page_text_map = {p["page"]: (p.get("text") or "") for p in page_texts}
+
+        chunks = []
+        for page in pages_data:
+            pg = page.get("page") or 0
+            pg_text = page_text_map.get(pg, "")
+            img_list = []
+            for img_path, desc in zip(page.get("images", []), page.get("image_descriptions", [])):
+                img_list.append({
+                    "filename": Path(img_path).name,
+                    "storage_path": img_path,
+                    "description": desc,
+                })
+            page_ocr_used = False
+            # OCR fallback if no text extracted
+            if enable_ocr and not (pg_text or "").strip() and img_list:
+                ocr_texts = []
+                for img in img_list:
+                    try:
+                        with Image.open(img["storage_path"]) as im:
+                            ocr_text = pytesseract.image_to_string(im)
+                            if ocr_text and ocr_text.strip():
+                                ocr_texts.append(ocr_text.strip())
+                    except Exception as e:
+                        logger.warning(f"OCR failed for image {img['filename']}: {e}")
+                if ocr_texts:
+                    pg_text = "\n".join(ocr_texts)
+                    page_ocr_used = True
+            # Ensure we have some minimal content to embed
+            if not (pg_text or "").strip():
+                pg_text = f"Page {pg}: [no extractable text]"
+            chunks.append({
+                "content": pg_text.strip(),
+                "chunk_index": max(0, int(pg) - 1),
+                "images": img_list,
+                "page_number": pg,
+                "section_type": "page",
+                "section_title": "",
+                "has_images": len(img_list) > 0,
+                "ocr_used": page_ocr_used,
+                "start_position": 0,
+                "end_position": len(pg_text or ""),
+            })
+        logger.info(f"Legacy page-based chunking created {len(chunks)} chunks for {fname}")
+    else:
+        # full-document processing for non-PDF files
+        doc_data = process_document_with_context_multi_model(
+            file_content=content,
+            filename=fname,
+            temp_dir=tmp_dir,
+            doc_id=fname,
+            openai_api_key=openai_api_key,
+            run_all_models=len(vision_models) > 1,
+            selected_models=set(vision_models),
+            vision_flags={m: (m in vision_models) for m in vision_models},
+        )
+
+        # Structure-preserving processing → embed → insert
+        try:
+            if use_structure_preserving_upload():
+                logger.info(f"Using structure-preserving upload for {fname}")
+                chunks = structure_preserving_process(doc_data["content"],
+                                                    doc_data["images_data"],
+                                                    fname)
+                logger.info(f"Structure-preserving processing completed: {len(chunks)} chunks")
+            else:
+                # Fallback to original chunking
+                logger.info(f"Using traditional chunking for {fname}")
+                chunks = smart_chunk_with_context(doc_data["content"],
+                                              doc_data["images_data"],
+                                              chunk_size, chunk_overlap)
+                logger.info(f"Traditional chunking completed: {len(chunks)} chunks")
+        except Exception as e:
+            logger.error(f"Structure-preserving processing failed for {fname}, falling back: {e}")
+            chunks = smart_chunk_with_context(doc_data["content"],
+                                          doc_data["images_data"],
+                                          chunk_size, chunk_overlap)
+
+    return chunks
 
 
 def run_ingest_job(
@@ -1210,96 +1349,26 @@ def run_ingest_job(
                     )
                 )
 
-                # 3) Build chunks (prefer page-based for PDFs)
-                use_page_chunking = True if ext == ".pdf" else False
+                # 3) Build chunks using position-aware wrapper
+                chunks = create_chunks_with_position_support(
+                    ext=ext,
+                    pages_data=pages_data,
+                    fname=fname,
+                    content=content,
+                    tmp_dir=tmp_dir,
+                    openai_api_key=openai_api_key,
+                    vision_models=vision_models,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                    enable_ocr=enable_ocr,
+                    use_positions=True
+                )
 
-                if use_page_chunking:
-                    # Extract page texts and correlate with images
-                    page_texts = extract_text_by_page(content, fname, tmp_dir)
-                    page_text_map = {p["page"]: (p.get("text") or "") for p in page_texts}
-
-                    chunks = []
-                    for page in pages_data:
-                        pg = page.get("page") or 0
-                        pg_text = page_text_map.get(pg, "")
-                        img_list = []
-                        for img_path, desc in zip(page.get("images", []), page.get("image_descriptions", [])):
-                            img_list.append({
-                                "filename": Path(img_path).name,
-                                "storage_path": img_path,
-                                "description": desc,
-                            })
-                        page_ocr_used = False
-                        # OCR fallback if no text extracted
-                        if enable_ocr and not (pg_text or "").strip() and img_list:
-                            ocr_texts = []
-                            for img in img_list:
-                                try:
-                                    with Image.open(img["storage_path"]) as im:
-                                        ocr_text = pytesseract.image_to_string(im)
-                                        if ocr_text and ocr_text.strip():
-                                            ocr_texts.append(ocr_text.strip())
-                                except Exception as e:
-                                    logger.warning(f"OCR failed for image {img['filename']}: {e}")
-                            if ocr_texts:
-                                pg_text = "\n".join(ocr_texts)
-                                page_ocr_used = True
-                        # Ensure we have some minimal content to embed
-                        if not (pg_text or "").strip():
-                            pg_text = f"Page {pg}: [no extractable text]"
-                        chunks.append({
-                            "content": pg_text.strip(),
-                            "chunk_index": max(0, int(pg) - 1),
-                            "images": img_list,
-                            "page_number": pg,
-                            "section_type": "page",
-                            "section_title": "",
-                            "has_images": len(img_list) > 0,
-                            "ocr_used": page_ocr_used,
-                            "start_position": 0,
-                            "end_position": len(pg_text or ""),
-                        })
-                    logger.info(f"Page-based chunking created {len(chunks)} chunks for {fname}")
-                else:
-                    # full-document processing
-                    doc_data = process_document_with_context_multi_model(
-                        file_content=content,
-                        filename=fname,
-                        temp_dir=tmp_dir,
-                        doc_id=fname,
-                        openai_api_key=openai_api_key,
-                        run_all_models=len(vision_models) > 1,
-                        selected_models=set(vision_models),
-                        vision_flags={m: (m in vision_models) for m in vision_models},
-                    )
-
-                    # Structure-preserving processing → embed → insert
-                    try:
-                        if use_structure_preserving_upload():
-                            logger.info(f"Using structure-preserving upload for {fname}")
-                            chunks = structure_preserving_process(doc_data["content"],
-                                                                doc_data["images_data"],
-                                                                fname)
-                            logger.info(f"Structure-preserving processing completed: {len(chunks)} chunks")
-                        else:
-                            # Fallback to original chunking
-                            logger.info(f"Using traditional chunking for {fname}")
-                            chunks = smart_chunk_with_context(doc_data["content"],
-                                                          doc_data["images_data"],
-                                                          chunk_size, chunk_overlap)
-                    except Exception as e:
-                        logger.error(f"Error in document processing for {fname}: {e}")
-                        logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
-                        # Fallback to original chunking if structure-preserving fails
-                        logger.info(f"Falling back to traditional chunking for {fname}")
-                        try:
-                            chunks = smart_chunk_with_context(doc_data["content"],
-                                                          doc_data["images_data"],
-                                                          chunk_size, chunk_overlap)
-                            logger.info(f"Traditional chunking successful: {len(chunks)} chunks created")
-                        except Exception as fallback_error:
-                            logger.error(f"CRITICAL: Both processing methods failed for {fname}: {fallback_error}")
-                            raise fallback_error
+                # Validate chunks were created
+                if not chunks:
+                    logger.error(f"No chunks created for {fname}, skipping document")
+                    redis_client.hset(doc_status_key, "status", "failed")
+                    continue
 
                 # Update document chunk count
                 redis_client.hset(doc_status_key, "chunks_total", len(chunks))
@@ -1340,6 +1409,15 @@ def run_ingest_job(
                         meta["image_filenames"]     = json.dumps(filenames)
                         meta["image_storage_paths"] = json.dumps(paths)
                         meta["image_descriptions"]  = json.dumps(descs)
+
+                        # Store image positions if available (from position-aware chunking)
+                        if "image_positions" in c:
+                            meta["image_positions"] = json.dumps(c["image_positions"])
+                            logger.debug(f"[{job_id}] Stored {len(c['image_positions'])} image positions for chunk {c.get('chunk_index', 0)}")
+                        else:
+                            # Legacy chunks without position data
+                            meta["image_positions"] = json.dumps([])
+
                         # Derive which vision models were used from description prefixes
                         models_used = set()
                         for d in descs:

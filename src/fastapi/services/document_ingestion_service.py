@@ -30,6 +30,17 @@ import functools
 from zipfile import ZipFile
 from bs4 import BeautifulSoup
 
+# Position-aware image placement imports
+from .position_aware_extraction import (
+    extract_images_with_positions,
+    add_text_anchors_to_images
+)
+from .position_aware_chunking import (
+    page_based_chunking_with_positions,
+    section_based_chunking_with_positions,
+    merge_images_with_descriptions
+)
+
 logger = logging.getLogger("DOC_INGESTION_SERVICE")
 
 load_dotenv()
@@ -80,10 +91,14 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # ChromaDB persistence directory (for legacy compatibility)
 PERSIST_DIR = os.getenv("PERSIST_DIRECTORY", "/chroma/chroma")
 
+# Feature flag for position-aware extraction and chunking
+USE_POSITION_AWARE = os.getenv("USE_POSITION_AWARE_EXTRACTION", "true").lower() == "true"
+
 logger.info("Document Ingestion Service initialized")
 logger.info(f"ChromaDB: {CHROMA_HOST}:{CHROMA_PORT}")
 logger.info(f"Embedding model: {EMBEDDING_MODEL_NAME}")
 logger.info(f"Redis: {REDIS_URL}")
+logger.info(f"Position-aware extraction: {'ENABLED' if USE_POSITION_AWARE else 'DISABLED'}")
 
 
 # =============================================================================
@@ -587,6 +602,56 @@ def extract_and_store_images_from_file(file_content: bytes, filename: str, temp_
 
     logger.info(f"Total images extracted from {filename}: {sum(len(p['images']) for p in pages_data)}")
     return pages_data
+
+
+def extract_images_with_position_support(
+    file_content: bytes,
+    filename: str,
+    temp_dir: str,
+    doc_id: str,
+    use_positions: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Wrapper that supports both legacy and position-aware extraction.
+
+    Args:
+        file_content: PDF file bytes
+        filename: Original filename
+        temp_dir: Temporary directory
+        doc_id: Document ID
+        use_positions: If True, use position-aware extraction
+
+    Returns:
+        List of page data with images
+    """
+    if use_positions and USE_POSITION_AWARE:
+        logger.info(f"Using position-aware extraction for {filename}")
+        try:
+            pages_data = extract_images_with_positions(
+                file_content=file_content,
+                filename=filename,
+                temp_dir=temp_dir,
+                doc_id=doc_id,
+                images_dir=IMAGES_DIR
+            )
+
+            # Add text anchors for better position matching
+            pages_data = add_text_anchors_to_images(
+                pages_data,
+                context_chars=100
+            )
+
+            logger.info(f"Position-aware extraction successful: {sum(len(p['images']) for p in pages_data)} images")
+            return pages_data
+
+        except Exception as e:
+            logger.error(f"Position-aware extraction failed, falling back to legacy: {e}")
+            # Fall through to legacy extraction
+
+    # Legacy extraction (current implementation)
+    logger.info(f"Using legacy extraction for {filename}")
+    return extract_and_store_images_from_file(file_content, filename, temp_dir, doc_id)
+
 
 def extract_text_by_page(file_content: bytes, filename: str, temp_dir: str) -> List[Dict]:
     """Extract text per page from a PDF using PyPDF2."""
@@ -1112,7 +1177,14 @@ def run_ingest_job(
             # 1) extract images and process document within same temp directory
             with tempfile.TemporaryDirectory() as tmp_dir:
                 if ext == ".pdf":
-                    pages_data = extract_and_store_images_from_file(content, fname, tmp_dir, fname)
+                    # Use position-aware extraction wrapper (falls back to legacy if needed)
+                    pages_data = extract_images_with_position_support(
+                        file_content=content,
+                        filename=fname,
+                        temp_dir=tmp_dir,
+                        doc_id=fname,
+                        use_positions=True  # Can be controlled per-request if needed
+                    )
 
                 elif ext == ".docx":
                     pages_data = extract_images_from_docx(content, fname, tmp_dir, fname)

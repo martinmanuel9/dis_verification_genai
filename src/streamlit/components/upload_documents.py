@@ -135,7 +135,12 @@ def view_images(key_prefix: str = "",):
                 render_reconstructed_document(result)
 
                 # ---- EXPORT DOCUMENTS ----
-                with st.expander("Export Document"):
+                with st.expander("Export Document", expanded=True):
+                    # Initialize session state for export
+                    export_state_key = pref("export_word_data")
+                    if export_state_key not in st.session_state:
+                        st.session_state[export_state_key] = None
+
                     # Use centralized FastAPI word_export_service for Word export
                     if st.button("Export to Word", key=pref("export_reconstructed_word")):
                         try:
@@ -149,21 +154,31 @@ def view_images(key_prefix: str = "",):
                             payload = export_resp.json()
                             b64 = payload.get("content_b64")
                             filename = payload.get("filename", f"{result['document_name']}.docx")
+
                             if b64:
                                 import base64
                                 blob = base64.b64decode(b64)
-                                st.download_button(
-                                    label=f"Download {filename}",
-                                    data=blob,
-                                    file_name=filename,
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    key=pref("download_reconstructed_word")
-                                )
-                                st.success("Word document ready!")
+                                # Store in session state
+                                st.session_state[export_state_key] = {
+                                    "data": blob,
+                                    "filename": filename
+                                }
+                                st.success("✅ Word document generated successfully!")
                             else:
                                 st.error("No file returned from export service.")
                         except Exception as e:
-                            st.error(f"Error exporting Word: {e}")
+                            st.error(f"❌ Error exporting Word: {e}")
+
+                    # Show download button if export data exists in session state
+                    if st.session_state[export_state_key]:
+                        export_data = st.session_state[export_state_key]
+                        st.download_button(
+                            label=f"📥 Download {export_data['filename']}",
+                            data=export_data["data"],
+                            file_name=export_data["filename"],
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key=pref("download_reconstructed_word")
+                        )
 
             except Exception as e:
                 st.error(f"Error reconstructing document: {str(e)}")

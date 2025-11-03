@@ -1,10 +1,7 @@
 import streamlit as st
-import requests
-from utils import *
-
-
-FASTAPI_API = os.getenv("FASTAPI_URL", "http://localhost:9020")
-HEALTH_ENDPOINT = f"{FASTAPI_API}/health"
+from config.settings import config
+from lib.api.client import api_client
+from services.chromadb_service import chromadb_service
 
 
 def Healthcheck_Sidebar():
@@ -27,12 +24,9 @@ def Healthcheck_Sidebar():
         if st.button("Check Health"):
             try:
                 with st.spinner("Checking health..."):
-                    response = requests.get(HEALTH_ENDPOINT, timeout=10)
-                    if response.ok:
-                        st.session_state.health_status = response.json()
-                        st.success("Online")
-                    else:
-                        st.error("System Issues")
+                    response = api_client.get(config.endpoints.health, timeout=10)
+                    st.session_state.health_status = response
+                    st.success("Online")
             except Exception as e:
                 st.error(f"Cannot connect to API: {e}")
     
@@ -45,9 +39,9 @@ def Healthcheck_Sidebar():
         
         if st.button("Load Collections"):
             try:
-                # Load collections from both sources
-                chromadb_collections = get_chromadb_collections()
-                
+                # Load collections using service
+                chromadb_collections = chromadb_service.get_collections()
+
                 # Combine and deduplicate
                 all_collections = list(set(chromadb_collections))
                 st.session_state.collections = all_collections
@@ -66,7 +60,7 @@ def Healthcheck_Sidebar():
         # Get collections for main interface
         try:
             if not st.session_state.collections:
-                chromadb_collections = get_chromadb_collections()
+                chromadb_collections = chromadb_service.get_collections()
                 collections = list(set(chromadb_collections))
                 st.session_state.collections = collections
             else:

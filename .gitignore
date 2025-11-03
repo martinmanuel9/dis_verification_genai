@@ -1,7 +1,35 @@
+# Environment files
 .env
+.env.*
+*.env
+
 volumes/**
 data/**
-models/** 
+models/**
 logs/**
 stored_images/**
-dis_pdu_src/data_operations/dis_synthetic_pdu/pdu_logs/** 
+dis_pdu_src/data_operations/dis_synthetic_pdu/pdu_logs/**
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg

@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.base
     image: base-poetry-deps
+    mem_limit: 4g
   postgres:
     image: postgres:17
     container_name: postgres_db
@@ -18,72 +19,54 @@ services:
       POSTGRES_DB: ${DB_NAME}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/backup
     networks:
       - ai_network
-
   chromadb:
-    build:
-      context: ./src/chromadb
-      dockerfile: Dockerfile.chromadb
+    image: chromadb/chroma:0.5.23
     container_name: chromadb
+    restart: unless-stopped
     mem_limit: 2g
-    restart: unless-stopped
+    cpu_count: 2
     ports:
-      - "8020:8020"
+      - "127.0.0.1:8000:8000"  # IMPORTANT: Localhost only for security
     environment:
-      - CHROMADB_PERSIST_DIRECTORY=/app/chroma_db_data
-      - OPEN_AI_API_KEY=${OPEN_AI_API_KEY}
-      - OLLAMA_URL=http://ollama:11434
-      - OLLAMA_VISION_MODEL=llava
-      - HUGGINGFACE_VISION_MODEL=Salesforce/blip-image-captioning-base
-      - REDIS_URL=redis://redis:6379/0
-    env_file:
-      - .env
-    depends_on:
-      - base-poetry-deps
-      - ollama
-    volumes:
-      - chromadata:/app/chroma_db_data
-      - ./stored_images:/app/stored_images
-      - ./.env:/app/.env
-    networks:
-      - ai_network
+      # Core settings
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=False
 
-  ollama:
-    build:
-      context: .
-      dockerfile: Dockerfile.ollama
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
+      # Authentication (optional for local, required for EC2)
+      - CHROMA_SERVER_AUTHN_PROVIDER=${CHROMA_AUTH_PROVIDER:-}
+      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMA_AUTH_TOKEN:-}
+
+      # CORS for local development
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["http://localhost:9020","http://localhost:8501"]
     volumes:
-      - ollama_models:/root/.ollama
+      # IMPORTANT: Note the different internal path
+      - chromadata:/chroma/chroma
+      - ./data/chromadb:/chroma/backup
     networks:
       - ai_network
-    environment:
-      - OLLAMA_KEEP_ALIVE=-1
-      - OLLAMA_NUM_PARALLEL=1
-      - OLLAMA_MAX_LOADED_MODELS=1
-    restart: unless-stopped
-    mem_limit: 6g
-    mem_reservation: 4g
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 120s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   fastapi:
     build:
       context: ./src/fastapi
       dockerfile: Dockerfile.fastapi
     container_name: fastapi
+    mem_limit: 2g
     ports:
       - "9020:9020"
     env_file:
       - .env
+    environment:
+      - ANONYMIZED_TELEMETRY=False
     depends_on:
       - base-poetry-deps
       - postgres
@@ -91,6 +74,9 @@ services:
       - ollama
     volumes:
       - huggingface_cache:/app/huggingface_cache
+      - ./data/huggingface_cache:/app/cache_backup
+      - ./src/llm_config:/app/llm_config:ro
+      - ./stored_images:/app/stored_images
     networks:
       - ai_network
 
@@ -99,18 +85,23 @@ services:
       context: ./src/streamlit
       dockerfile: Dockerfile.streamlit
     container_name: streamlit
+    mem_limit: 1g
     ports:
       - "8501:8501"
     env_file:
       - .env
     depends_on:
       - base-poetry-deps
+    volumes:
+      - ./src/llm_config:/app/llm_config:ro
+      - ./stored_images:/app/stored_images:ro
     networks:
       - ai_network
 
   redis:
     image: redis:7-alpine
     container_name: redis
+    mem_limit: 512m
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -119,13 +110,56 @@ services:
     networks:
       - ai_network
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    mem_limit: 6g
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - ai_network
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./scripts/init-ollama.sh:/init-ollama.sh:ro
+    networks:
+      - ai_network
+    environment:
+      - OLLAMA_MODELS=${OLLAMA_MODELS:-llama3.2:latest}
+    entrypoint: ["/bin/sh", "/init-ollama.sh"]
+    restart: "no"
+
 networks:
   ai_network:
     driver: bridge
 
 volumes:
   pgdata:
+    driver: local
+    name: genai_postgres_data
   chromadata:
-  ollama_models:
+    driver: local
+    name: genai_chroma_data
   huggingface_cache:
+    driver: local
+    name: genai_hf_cache
   redis-data:
+    driver: local
+    name: genai_redis_data
+  ollama-data:
+    driver: local
+    name: genai_ollama_data

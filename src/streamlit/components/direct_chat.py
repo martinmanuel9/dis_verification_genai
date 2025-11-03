@@ -1,37 +1,27 @@
-import os
 import streamlit as st
-import requests
-from utils import *
+from config.settings import config
+from config.constants import MODEL_KEY_MAP as model_key_map, MODEL_DESCRIPTIONS as model_descriptions
+from lib.api.client import api_client
+from services.chromadb_service import chromadb_service
+from services.chat_service import chat_service
 from components.upload_documents import render_upload_component, browse_documents
 from components.history import Chat_History
 
+CHROMADB_API = config.endpoints.vectordb
 
-# Constants
-FASTAPI_API      = os.getenv("FASTAPI_URL", "http://localhost:9020")
-CHROMADB_API     = os.getenv("CHROMA_URL", "http://localhost:8020")
-CHAT_ENDPOINT    = f"{FASTAPI_API}/chat"
-HISTORY_ENDPOINT = f"{FASTAPI_API}/chat-history"
-EVALUATE_ENDPOINT = f"{FASTAPI_API}/evaluate_doc"
-
-# Memoize document listings to avoid resetting on rerun
 @st.cache_data(show_spinner=False)
 def fetch_collections():
-    return get_chromadb_collections()
-
+    return chromadb_service.get_collections()
 
 def Direct_Chat():
-    # Load collections once per session
     if "collections" not in st.session_state:
         st.session_state.collections = fetch_collections()
 
     collections = st.session_state.collections
-
-    # Tabs
-    chat_tab, eval_tab = st.tabs([
-        "Chat Interface", "Evaluate Document"
+    chat_tab, eval_tab, doc_upload_tab = st.tabs([
+        "Chat Interface", "Evaluate Document", "Upload Documents"
     ])
 
-    # --- Chat Interface ---
     with chat_tab:
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -60,34 +50,23 @@ def Direct_Chat():
             elif use_rag and not collection_name:
                 st.error("Please select a collection for RAG mode.")
             else:
-                payload = {
-                    "query": user_input,
-                    "model": model_key_map[mode],
-                    "use_rag": use_rag,
-                    "collection_name": collection_name
-                }
                 with st.spinner(f"{mode} is analyzing..."):
                     try:
-                        resp = requests.post(CHAT_ENDPOINT, json=payload, timeout=300)
-                        if resp.ok:
-                            data = resp.json()
-                            result = data.get("response", "")
-                            st.success("Analysis Complete:")
-                            st.markdown(result)
-                            if data.get("response_time_ms"):
-                                rt = data["response_time_ms"]
-                                st.caption(f"Response time: {rt/1000:.2f}s")
-                        else:
-                            detail = resp.json().get("detail", resp.text)
-                            st.error(f"Error {resp.status_code}: {detail}")
+                        response = chat_service.send_message(
+                            query=user_input,
+                            model=model_key_map[mode],
+                            use_rag=use_rag,
+                            collection_name=collection_name
+                        )
+                        st.success("Analysis Complete:")
+                        st.markdown(response.response)
+                        if response.response_time_ms:
+                            st.caption(f"Response time: {response.response_time_ms/1000:.2f}s")
                     except Exception as e:
                         st.error(f"Request failed: {e}")
 
-        # Chat History
         Chat_History(key_prefix="chat_history")
 
-
-    # --- Evaluate Document ---
     with eval_tab:
         st.header("Evaluate Document")
         use_rag_eval = st.checkbox(
@@ -96,6 +75,7 @@ def Direct_Chat():
         collections = st.session_state.collections
         if use_rag_eval:
             browse_documents(key_prefix="select_eval_browse")
+            
             with st.container(border=True, key="eval_params_container"):
                 st.subheader("Evaluation Parameters")
                 
@@ -103,10 +83,41 @@ def Direct_Chat():
                     "Select Collection:", collections, key="eval_collection"
                 )
 
-                doc_id = st.text_input(
-                    "Document ID (for RAG mode):",
+                doc_id = ""
+                if "documents" in st.session_state and st.session_state.documents:
+                    doc_options = {}
+                    for doc in st.session_state.documents:
+                        if hasattr(doc, 'document_name'):
+                            doc_name = doc.document_name
+                            doc_id_val = doc.document_id
+                        else:
+                            doc_name = doc.get('document_name', 'Unknown')
+                            doc_id_val = doc.get('id', doc.get('document_id', ''))
+                        if doc_id_val:
+                            display_name = f"{doc_name} (ID: {doc_id_val[:8]}...)"
+                            doc_options[display_name] = doc_id_val
+                    
+                    if doc_options:
+                        selected_display = st.selectbox(
+                            "Select Document:",
+                            options=list(doc_options.keys()),
+                            key="eval_document_selector"
+                        )
+                        doc_id = doc_options[selected_display]
+                        st.info(f"Selected Document ID: {doc_id}")
+                    else:
+                        st.warning("No documents found. Please load documents first.")
+                else:
+                    st.info("Please load documents first.")
+
+                manual_doc_id = st.text_input(
+                    "Or enter Document ID manually:",
                     placeholder="e.g. 12345abcde",
+                    key="manual_doc_id"
                 )
+
+                if manual_doc_id:
+                    doc_id = manual_doc_id
                 
                 custom_prompt = st.text_area(
                     "Custom Prompt:", height=150, key="eval_prompt"
@@ -121,64 +132,50 @@ def Direct_Chat():
                     elif use_rag_eval and (not coll_name or not doc_id):
                         st.error("Select both collection and document for RAG mode.")
                     else:
-                        # pick endpoint & payload
-                        if use_rag_eval:
-                            endpoint = EVALUATE_ENDPOINT
-                            payload = {
-                                "document_id":     doc_id,
-                                "collection_name": coll_name,
-                                "prompt":          custom_prompt,
-                                "top_k":           5,
-                                "model_name":      model_key_map[mode2]
-                            }
-                        else:
-                            endpoint = CHAT_ENDPOINT
-                            payload = {
-                                "query":           custom_prompt,
-                                "model":           model_key_map[mode2],
-                                "use_rag":         False,
-                                "collection_name": None
-                            }
-
                         with st.spinner("Evaluating document..."):
-                            # 1) Fire the request
                             try:
-                                resp = requests.post(endpoint, json=payload, timeout=300)
-                            except requests.exceptions.RequestException as e:
-                                st.error(f"Request failed: {e}")
-                                # nothing else to do
-                                return
-
-                            # 2) Parse the response
-                            if resp.ok:
-                                data = resp.json()
-                                answer     = data["response"]
-                                rt_ms      = data["response_time_ms"]
-                                session_id = data["session_id"]
+                                if use_rag_eval:
+                                    data = chat_service.evaluate_document(
+                                        document_id=doc_id,
+                                        collection_name=coll_name,
+                                        prompt=custom_prompt,
+                                        model_name=model_key_map[mode2],
+                                        top_k=5
+                                    )
+                                    answer = data["response"]
+                                    rt_ms = data.get("response_time_ms", 0)
+                                    session_id = data["session_id"]
+                                else:
+                                    response = chat_service.send_message(
+                                        query=custom_prompt,
+                                        model=model_key_map[mode2],
+                                        use_rag=False,
+                                        collection_name=None
+                                    )
+                                    answer = response.response
+                                    rt_ms = response.response_time_ms or 0
+                                    session_id = response.session_id
 
                                 st.success("Evaluation Complete:")
                                 st.markdown(answer)
                                 st.caption(f"Response time: {rt_ms/1000:.2f}s")
                                 st.caption(f"Session ID: {session_id}")
-                            else:
-                                st.error(f"Error {resp.status_code}: {resp.text}")
-                                
-                                
-            # chat history for evaluation
+                            except Exception as e:
+                                st.error(f"Request failed: {e}")
+
             Chat_History(key_prefix="eval_chat_history")
 
-            # Render upload component for evaluation
-            render_upload_component(
-                available_collections=collections,
-                load_collections_func=lambda: st.session_state.collections,
-                create_collection_func=create_collection,
-                upload_endpoint=f"{CHROMADB_API}/documents/upload-and-process",
-                job_status_endpoint=f"{CHROMADB_API}/jobs/{{job_id}}",
-                key_prefix="eval"
-            )
-            
         else:
             st.info("RAG disabled: evaluation will be pure LLM.")
-            
-        
 
+    with doc_upload_tab:
+        st.header("Upload Documents for RAG")
+        render_upload_component(
+            available_collections=collections,
+            load_collections_func=lambda: st.session_state.collections,
+            create_collection_func=chromadb_service.create_collection,
+            upload_endpoint=f"{CHROMADB_API}/documents/upload-and-process",
+            job_status_endpoint=f"{CHROMADB_API}/jobs/{{job_id}}",
+            key_prefix="eval"
+        )
+        

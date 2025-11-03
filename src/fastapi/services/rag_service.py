@@ -1,375 +1,669 @@
 import os
 import uuid
 import time
+import hashlib
+import json
+import logging
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
-
+from functools import lru_cache
+import chromadb
 from langchain_core.messages import HumanMessage
-from chromadb import Client
-from chromadb.config import Settings
+from langchain.schema import Document
+from langchain.chains.question_answering import load_qa_chain
 from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 from services.database import (
-    SessionLocal, 
-    ComplianceAgent, 
-    DebateSession, 
+    SessionLocal,
+    ComplianceAgent,
+    DebateSession,
     log_compliance_result,
     log_agent_response,
     log_agent_session,
     complete_agent_session,
+    log_rag_citations,
     SessionType,
     AnalysisType
 )
 
+logger = logging.getLogger("RAG_SERVICE_LOGGER")
+
 class RAGService:
     def __init__(self):
-        self.chromadb_api_url = os.getenv("CHROMA_URL", "http://localhost:8020")
-        self.embedding_function = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+        # Replace HTTP URL with direct client
+        chroma_host = os.getenv("CHROMA_HOST", "chromadb")
+        chroma_port = int(os.getenv("CHROMA_PORT", "8000"))
+
+        # Native ChromaDB client (replaces HTTP session)
+        self.chroma_client = chromadb.HttpClient(
+            host=chroma_host,
+            port=chroma_port,
+            # Add auth if configured
+            headers=self._get_auth_headers()
+        )
+
+        # Embedding function (keep existing)
+        self.embedding_function = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/multi-qa-mpnet-base-dot-v1"
+        )
+
         self.n_results = int(os.getenv("N_RESULTS", "5"))
-        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
-        self.compliance_agents = []
-        
-        print(f"    RAG Service API Config:")
-        print(f"    ChromaDB API URL: {self.chromadb_api_url}")
-        
+
         # Test connection
         self.test_connection()
-        
-    def test_connection(self):
-        """Test connection to ChromaDB API"""
-        try:
-            response = requests.get(f"{self.chromadb_api_url}/health", timeout=5)
-            if response.status_code == 200:
-                print(f"ChromaDB API connection successful")
-                return True
+    
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Get authentication headers if configured"""
+        auth_token = os.getenv("CHROMA_AUTH_TOKEN")
+        if auth_token:
+            return {"Authorization": f"Bearer {auth_token}"}
+        return {}
+
+    @lru_cache(maxsize=1000)
+    def _get_cached_embedding(self, query_hash: str, query: str) -> List[float]:
+        """
+        Generate and cache query embeddings.
+        Uses LRU cache with query hash as key for better performance.
+        """
+        logger.debug(f"Generating embedding for query: {query[:50]}...")
+        embedding = self.embedding_function.embed_query(query)
+        return embedding
+
+    def _generate_query_hash(self, query: str) -> str:
+        """Generate a hash for query caching."""
+        return hashlib.md5(query.encode('utf-8')).hexdigest()
+
+    def _extract_excerpt(self, doc_text: str, max_length: int = 1500) -> str:
+        """
+        Extract a meaningful excerpt from document text.
+
+        Args:
+            doc_text: Full document text
+            max_length: Maximum length of excerpt (default 1500 chars)
+
+        Returns:
+            Excerpt string suitable for citation
+        """
+        if not doc_text:
+            return ""
+
+        if len(doc_text) <= max_length:
+            return doc_text.strip()
+
+        lines = doc_text.split('\n')
+        substantial_lines = [line for line in lines if len(line.strip()) > 40]
+
+        if substantial_lines:
+            excerpt_text = '\n'.join(substantial_lines)
+            if len(excerpt_text) > max_length:
+                truncated = excerpt_text[:max_length]
+                last_period = truncated.rfind('.')
+                if last_period > max_length - 200:
+                    return excerpt_text[:last_period + 1] + "\n\n[...continued]"
+                return truncated + "...\n\n[...continued]"
+            return excerpt_text.strip()
+
+        return doc_text[:max_length].strip() + "\n\n[...continued]"
+
+    def _get_quality_tier_from_distance(self, distance: float) -> str:
+        """
+        Categorize document quality based on distance score.
+        Lower distance = better match. No filtering - just informational tiers.
+
+        ChromaDB uses L2 (Euclidean) distance by default where:
+        - Distance 0 = perfect match
+        - Typical good matches: 0-10
+        - Fair matches: 10-30
+        - Poor matches: 30+
+
+        Args:
+            distance: Distance score from ChromaDB (lower is better)
+
+        Returns:
+            Quality tier: "Excellent", "High", "Good", "Fair", "Low"
+        """
+        if distance <= 5:
+            return "Excellent"
+        elif distance <= 15:
+            return "High"
+        elif distance <= 30:
+            return "Good"
+        elif distance <= 50:
+            return "Fair"
+        else:
+            return "Low"
+
+    def _explain_distance_score(self, distance: float) -> str:
+        """
+        Provide a human-readable explanation of the distance score.
+
+        Args:
+            distance: Distance score from ChromaDB
+
+        Returns:
+            Explanation string
+        """
+        if distance <= 5:
+            return "Very similar - highly relevant to your query"
+        elif distance <= 15:
+            return "Similar - relevant to your query"
+        elif distance <= 30:
+            return "Moderately similar - may contain relevant information"
+        elif distance <= 50:
+            return "Somewhat related - limited relevance"
+        else:
+            return "Distant match - may not be directly relevant"
+
+    def _extract_smart_excerpt(self, doc_text: str, doc_metadata: Dict[str, Any]) -> str:
+        """
+        Extract a smart, context-aware excerpt from the document.
+
+        Instead of arbitrary character limits, this uses the full chunk text
+        since ChromaDB chunks are already semantically meaningful units
+        (typically 1000 chars with 200 char overlap, broken at sentence boundaries).
+
+        For very long chunks, we provide a focused excerpt with ellipsis.
+
+        Args:
+            doc_text: The full chunk text from ChromaDB
+            doc_metadata: Metadata about the chunk
+
+        Returns:
+            Context-aware excerpt suitable for legal citation
+        """
+        # For chunks under 2000 chars, use the full text (it's already a coherent unit)
+        if len(doc_text) <= 2000:
+            return doc_text.strip()
+
+        # For longer chunks, extract a focused excerpt
+        # Try to find the most substantial content (avoid headers/footers)
+        lines = doc_text.split('\n')
+
+        # Filter out very short lines (likely headers/footers)
+        substantial_lines = [line for line in lines if len(line.strip()) > 40]
+
+        if substantial_lines:
+            # Take first ~1500 chars of substantial content
+            excerpt_text = '\n'.join(substantial_lines)
+            if len(excerpt_text) > 1500:
+                # Find a good breaking point (sentence or paragraph)
+                truncated = excerpt_text[:1500]
+                last_period = truncated.rfind('.')
+                last_newline = truncated.rfind('\n\n')
+
+                if last_period > 1000:
+                    excerpt_text = excerpt_text[:last_period + 1] + "\n\n[...continued]"
+                elif last_newline > 1000:
+                    excerpt_text = excerpt_text[:last_newline] + "\n\n[...continued]"
+                else:
+                    excerpt_text = truncated + "...\n\n[...continued]"
+
+            return excerpt_text.strip()
+
+        # Fallback: use first 1500 chars with ellipsis
+        return doc_text[:1500].strip() + "\n\n[...continued]"
+
+    def _format_legal_citation(self, doc_metadata: Dict[str, Any], doc_num: int) -> str:
+        """
+        Format a single document citation in legal/academic style.
+        Similar to Bluebook citation format for legal documents.
+
+        Args:
+            doc_metadata: Metadata dict containing document information
+            doc_num: Citation number (for reference in text)
+
+        Returns:
+            Formatted citation string (e.g., "[1] MIL-STD-188-203-1A, at 13")
+        """
+        doc_name = doc_metadata.get('document_name', doc_metadata.get('source', 'Unknown'))
+        page_num = doc_metadata.get('page_number', doc_metadata.get('page'))
+
+        # Base citation with document name
+        citation = f"[{doc_num}] {doc_name}"
+
+        # Add page number if available (legal citation style)
+        if page_num:
+            citation += f", at {page_num}"
+
+        # Add section if available
+        section = doc_metadata.get('section_title', doc_metadata.get('section_name'))
+        if section and section.strip():
+            citation += f", § {section}"
+
+        return citation
+
+    def _format_document_citations(self, metadata_list: List[Dict[str, Any]]) -> str:
+        """
+        Format document citations in legal/academic research style with:
+        1. Formal citation references
+        2. Contextual excerpts with highlighted relevance
+        3. Source provenance information
+        4. Relevance scoring for transparency
+
+        Args:
+            metadata_list: List of document metadata dicts
+
+        Returns:
+            Formatted citation string for appending to responses
+        """
+        if not metadata_list:
+            return ""
+
+        # Build citation section similar to research paper references
+        citations = ["\n\n" + "-"*80]
+        citations.append("SOURCES AND CITATIONS")
+        citations.append("-"*80 + "\n")
+        citations.append("This response is based on the following source documents:\n")
+
+        # Create numbered citations (legal/academic style)
+        for meta in metadata_list:
+            doc_num = meta['document_index']
+            distance = meta['distance']
+            doc_metadata = meta.get('metadata', {})
+            quality_tier = meta.get('quality_tier', 'Unknown')
+            distance_explanation = meta.get('distance_explanation', '')
+
+            # Format legal-style citation
+            legal_cite = self._format_legal_citation(doc_metadata, doc_num)
+
+            # Get additional metadata for provenance
+            chunk_index = doc_metadata.get('chunk_index', 0)
+            total_chunks = doc_metadata.get('total_chunks', 1)
+            start_pos = doc_metadata.get('start_position', 0)
+            end_pos = doc_metadata.get('end_position', 0)
+
+            # Build comprehensive citation entry
+            citation_entry = [f"\n{legal_cite}"]
+
+            # Add relevance assessment
+            citation_entry.append(f"   Relevance: {quality_tier} (Distance: {distance:.2f} - {distance_explanation})")
+
+            # Add location within document
+            location_info = f"   Location: Chunk {chunk_index + 1} of {total_chunks}"
+            if start_pos and end_pos:
+                location_info += f" (chars {start_pos}-{end_pos})"
+            citation_entry.append(location_info)
+
+            # Add substantive excerpt with context markers
+            # Extract excerpt from document_text or metadata
+            document_text = meta.get('document_text', '')
+            excerpt = meta.get('excerpt', self._extract_excerpt(document_text))
+            full_length = meta.get('full_length', doc_metadata.get('full_length', len(document_text)))
+
+            # Indicate if excerpt is from beginning, middle, or end
+            position_indicator = ""
+            if start_pos == 0:
+                position_indicator = "[Beginning of document] "
+            elif end_pos and full_length and end_pos >= full_length - 100:
+                position_indicator = "[End of document] "
+            elif start_pos and full_length:
+                position_indicator = f"[Position {start_pos:,} of {full_length:,} chars] "
+
+            citation_entry.append(f"\n   Excerpt:")
+            if position_indicator:
+                citation_entry.append(f"   {position_indicator}")
+
+            # Format excerpt with better readability
+            if excerpt:
+                excerpt_lines = excerpt.split('\n')
+                cleaned_lines = []
+                for line in excerpt_lines:
+                    stripped = line.strip()
+                    if stripped:
+                        cleaned_lines.append(f"   | {stripped}")
+
+                if cleaned_lines:
+                    citation_entry.append('\n'.join(cleaned_lines[:15]))
+                    if len(cleaned_lines) > 15:
+                        citation_entry.append(f"   | ... ({len(cleaned_lines) - 15} more lines)")
             else:
-                print(f"ChromaDB API returned status: {response.status_code}")
-                return False
-        except Exception as e:
-            print(f"ChromaDB API connection failed: {e}")
+                citation_entry.append("   | [No excerpt available]")
+
+            # Add timestamp if available
+            timestamp = doc_metadata.get('timestamp')
+            if timestamp:
+                citation_entry.append(f"\n   Indexed: {timestamp}")
+
+            citations.append('\n'.join(citation_entry))
+
+        # Add footer with explanation
+        citations.append("\n" + "-"*80)
+        citations.append("CITATION GUIDE:")
+        citations.append("Citations follow [number] Document Name, at page format\n")
+        citations.append("Relevance tiers: Excellent > High > Good > Fair > Low \n")
+        citations.append("Distance scores: Lower values indicate better semantic matches \n")
+        citations.append("Excerpts show the specific content used to generate this response\n")
+        citations.append("-"*80)
+
+        return "\n".join(citations)
+
+    def _validate_collection_name(self, collection_name: str) -> bool:
+        """
+        Validate collection name to prevent injection attacks.
+        Collection names should only contain alphanumeric characters, hyphens, and underscores.
+        """
+        import re
+        if not collection_name or not isinstance(collection_name, str):
             return False
+        # Allow alphanumeric, hyphens, underscores, and dots (common in collection names)
+        if not re.match(r'^[a-zA-Z0-9_\-\.]+$', collection_name):
+            logger.warning(f"Invalid collection name format: {collection_name}")
+            return False
+        if len(collection_name) > 255:  # Reasonable max length
+            logger.warning(f"Collection name too long: {len(collection_name)} characters")
+            return False
+        return True
+
+    def run_rag_chain(
+        self,
+        query: str,
+        collection_name: str,
+        model_name: str,
+        top_k: Optional[int] = None,
+        include_citations: bool = True
+    ) -> Tuple[str, int]:
+        """
+        1) Pulls the top-k docs from ChromaDB via your API
+        2) Stuffs them into a LangChain QA chain
+        3) Returns (answer, response_time_ms)
+
+        Args:
+            query: The search query
+            collection_name: Name of the collection to search
+            model_name: LLM model to use for generation
+            top_k: Number of documents to retrieve (optional, uses self.n_results if not specified)
+            include_citations: If True, appends document citations to the response
+
+        Returns:
+            Tuple of (answer_with_citations, response_time_ms)
+        """
+        # 1) fetch docs with metadata
+        docs, found, metadata_list = self.get_relevant_documents(
+            query=query,
+            collection_name=collection_name,
+            top_k=top_k,
+            include_metadata=include_citations
+        )
+        if not found:
+            return "No relevant documents found.", 0
+
+        # 2) wrap for LangChain
+        lc_docs = [Document(page_content=d) for d in docs]
+
+        # 3) build a simple "stuff" QA chain
+        llm = get_llm(model_name=model_name)
+        chain = load_qa_chain(llm, chain_type="stuff")
+
+        start = time.time()
+        answer = chain.run(input_documents=lc_docs, question=query)
+        rt_ms = int((time.time() - start) * 1000)
+
+        # 4) Append citations if requested
+        if include_citations and metadata_list:
+            citations = self._format_document_citations(metadata_list)
+            answer = answer + citations
+
+        return answer, rt_ms
+
+
+    def process_query_with_rag(
+        self,
+        query_text: str,
+        collection_name: str,
+        model_name: str,
+        top_k: Optional[int] = None,
+        include_citations: bool = True
+    ) -> Tuple[str, int]:
+        """
+        Simple RAG entrypoint that:
+            1) Retrieves top-k docs
+            2) Runs a 'stuff'-style QA chain
+            3) Returns (response, response_time_ms)
+
+        Args:
+            query_text: The user query
+            collection_name: Name of the collection to search
+            model_name: LLM model to use
+            top_k: Number of documents to retrieve (optional)
+            include_citations: If True, includes document citations with similarity scores
+
+        Returns:
+            Tuple of (answer_string, response_time_ms)
+        """
+
+        answer, rt_ms = self.run_rag_chain(
+            query=query_text,
+            collection_name=collection_name,
+            model_name=model_name,
+            top_k=top_k,
+            include_citations=include_citations
+        )
+        logger.info(f"RAG response in rag_service: {answer[:200]}... (took {rt_ms} ms)")
+
+        return answer, rt_ms
         
-    def list_available_collections(self) -> List[str]:
-        """List all available collections via API"""
+        
+        
+    def test_connection(self) -> bool:
+        """Test ChromaDB connection"""
         try:
-            response = requests.get(f"{self.chromadb_api_url}/collections", timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            collections = data.get("collections", [])
-            print(f"Available collections (via API): {collections}")
-            return collections
+            heartbeat = self.chroma_client.heartbeat()
+            print(f"ChromaDB connected: {heartbeat}")
+            return True
         except Exception as e:
-            print(f"Error listing collections via API: {e}")
+            print(f"ChromaDB connection failed: {e}")
+            return False
+
+    def list_available_collections(self) -> List[str]:
+        """List all available collections via native ChromaDB client"""
+        try:
+            collections = self.chroma_client.list_collections()
+            collection_names = [c.name for c in collections]
+            logger.info(f"Available collections: {collection_names}")
+            return collection_names
+        except Exception as e:
+            logger.error(f"Error listing collections: {e}")
             return []
 
-        
-    def verify_uploaded_documents(self):
-        """Verify RAG service can see documents uploaded via Streamlit"""
-        print("VERIFYING RAG SERVICE CAN ACCESS UPLOADED DOCUMENTS")
-        print("=" * 60)
-        
+
+    def get_relevant_documents(
+        self,
+        query: str,
+        collection_name: str,
+        top_k: int = None,
+        n_results: int = None,
+        where: Optional[Dict] = None,
+        include_metadata: bool = False
+    ):
+        """
+        Query ChromaDB directly and return results.
+
+        Args:
+            query: Search query
+            collection_name: Name of collection
+            top_k: Number of results (alias for n_results)
+            n_results: Number of results
+            where: Optional filter
+            include_metadata: If True, returns tuple format with metadata for citations
+
+        Returns:
+            If include_metadata=True: Tuple of (documents, found, metadata_list)
+            If include_metadata=False: Dict with results
+        """
         try:
-            collections = self.list_available_collections()
-            
-            if not collections:
-                print("No collections found!")
-                return False
-            
-            found_documents = False
-            for collection_name in collections:
-                print(f"\nChecking collection: '{collection_name}'")
-                
-                collection = self.chroma_client.get_collection(collection_name)
-                doc_count = collection.count()
-                print(f"   Document count: {doc_count}")
-                
-                if doc_count > 0:
-                    found_documents = True
-                    print(f"    Found {doc_count} documents!")
-                    
-                    # Show sample documents
-                    sample = collection.peek(2)
-                    docs = sample.get('documents', [])
-                    ids = sample.get('ids', [])
-                    
-                    for i, (doc_id, doc) in enumerate(zip(ids, docs)):
-                        print(f"        Doc {i+1} ID: {doc_id}")
-                        print(f"        Preview: {doc[:150]}...")
-                    
-                    # Test different queries
-                    test_queries = ["document", "legal", "court", "rule", "motion", "case"]
-                    
-                    print(f"\nTesting queries on '{collection_name}':")
-                    for query in test_queries:
-                        docs, found = self.get_relevant_documents(query, collection_name)
-                        if found:
-                            print(f"Query '{query}': Found {len(docs)} documents")
-                            return True
-                        else:
-                            print(f"Query '{query}': No matches")
-            
-            if not found_documents:
-                print("No documents found in any collection")
-                
-            return found_documents
-            
-        except Exception as e:
-            print(f"Error verifying documents: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def get_relevant_documents(self, query: str, collection_name: str) -> Tuple[List[str], bool]:
-        """Get relevant documents via FastAPI"""
-        try:
-            print(f"RAG Query (API): '{query[:100]}...' in collection: '{collection_name}'")
-            
-            # Check if collection exists and has documents
-            try:
-                response = requests.get(
-                    f"{self.chromadb_api_url}/documents", 
-                    params={"collection_name": collection_name},
-                    timeout=10
-                )
-                
-                if response.status_code == 404:
-                    print(f"Collection '{collection_name}' not found")
-                    # List available collections for debugging
-                    available = self.list_available_collections()
-                    print(f"Available collections: {available}")
-                    return [], False
-                
-                response.raise_for_status()
-                docs_data = response.json()
-                
-            except Exception as e:
-                print(f"Error checking collection: {e}")
-                return [], False
-            
-            # Check if collection has documents
-            doc_count = len(docs_data.get("documents", []))
-            print(f"Collection '{collection_name}' has {doc_count} documents")
-            
-            if doc_count == 0:
-                print(f"No documents in collection")
-                return [], False
-            
+            # Get collection
+            collection = self.chroma_client.get_collection(collection_name)
+
             # Generate query embedding
             query_embedding = self.embedding_function.embed_query(query)
-            
-            # Query via API
-            query_payload = {
-                "collection_name": collection_name,
-                "query_embeddings": [query_embedding],
-                "n_results": min(self.n_results, doc_count),
-                "include": ["documents", "metadatas", "distances"]
+
+            # Use top_k if provided, otherwise n_results, otherwise default
+            num_results = top_k or n_results or self.n_results
+
+            # Query collection (native method - much faster)
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=num_results,
+                where=where,
+                include=["documents", "metadatas", "distances"]
+            )
+
+            documents = results["documents"][0] if results["documents"] else []
+            metadatas = results["metadatas"][0] if results["metadatas"] else []
+            distances = results["distances"][0] if results["distances"] else []
+
+            # Return tuple format for RAG chain (with metadata for citations)
+            if include_metadata:
+                found = len(documents) > 0
+
+                # Build metadata list with citation info
+                metadata_list = []
+                for idx, (doc, meta, dist) in enumerate(zip(documents, metadatas, distances), 1):
+                    metadata_list.append({
+                        'document_index': idx,
+                        'distance': dist,
+                        'quality_tier': self._get_quality_tier_from_distance(dist),
+                        'distance_explanation': f"Similarity score: {1 - (dist / 100):.2%}",
+                        'metadata': meta,
+                        'document_text': doc
+                    })
+
+                return documents, found, metadata_list
+
+            # Return dict format for API compatibility
+            return {
+                "status": "success",
+                "query": query,
+                "collection": collection_name,
+                "results": {
+                    "ids": results["ids"][0] if results["ids"] else [],
+                    "documents": documents,
+                    "metadatas": metadatas,
+                    "distances": distances
+                }
             }
-            
-            try:
-                response = requests.post(
-                    f"{self.chromadb_api_url}/documents/query", 
-                    json=query_payload,
-                    timeout=30
-                )
-                response.raise_for_status()
-                query_results = response.json()
-                
-            except Exception as e:
-                print(f"Error querying documents: {e}")
-                return [], False
-            
-            # Extract results
-            documents = query_results.get("documents", [[]])[0]
-            distances = query_results.get("distances", [[]])[0]
-            
-            if not documents:
-                print(f"Query returned no results")
-                return [], False
-            
-            print(f"Query returned {len(documents)} results:")
-            for i, (doc, distance) in enumerate(zip(documents, distances)):
-                similarity = 1.0 - distance
-                print(f"  Result {i+1}: Similarity={similarity:.4f}")
-                print(f"    Preview: {doc[:100]}...")
-            
-            # Apply similarity threshold
-            filtered_docs = []
-            for doc, distance in zip(documents, distances):
-                similarity = 1.0 - distance
-                if similarity >= self.similarity_threshold:
-                    filtered_docs.append(doc)
-            
-            # print(f"After threshold filter ({self.similarity_threshold}): {len(filtered_docs)} docs")
-            
-            # If no docs pass threshold, use top results anyway
-            if not filtered_docs and documents:
-                # print(f"No docs passed threshold, using top {min(3, len(documents))} results")
-                filtered_docs = documents[:3]
-            
-            if filtered_docs:
-                # print(f"Successfully retrieved {len(filtered_docs)} relevant documents")
-                return filtered_docs, True
-            else:
-                print(f"No relevant documents found")
-                return [], False
-            
         except Exception as e:
-            print(f"Error in API RAG: {e}")
-            import traceback
-            traceback.print_exc()
-            return [], False
+            if include_metadata:
+                return [], False, []
+            return {
+                "status": "error",
+                "message": str(e),
+                "query": query,
+                "collection": collection_name
+            }
         
-    def verify_uploaded_documents(self):
-        """Verify RAG service can see documents uploaded via Streamlit"""
-        print("VERIFYING RAG SERVICE CAN ACCESS UPLOADED DOCUMENTS (VIA API)")
-        print("=" * 70)
-        
-        # Test API connection first
-        if not self.test_connection():
-            print("Cannot connect to ChromaDB API")
-            return False
-        
-        # List collections
-        collections = self.list_available_collections()
-        
-        if not collections:
-            print("No collections found!")
-            print("Make sure you've uploaded documents via your Streamlit interface first")
-            return False
-        
-        # Test each collection
-        found_documents = False
-        for collection_name in collections:
-            print(f"\nTesting collection: '{collection_name}'")
-            
-            # Get documents in this collection
-            try:
-                response = requests.get(
-                    f"{self.chromadb_api_url}/documents", 
-                    params={"collection_name": collection_name},
-                    timeout=10
-                )
-                response.raise_for_status()
-                docs_data = response.json()
-                
-                doc_count = len(docs_data.get("documents", []))
-                print(f"   Document count: {doc_count}")
-                
-                if doc_count > 0:
-                    found_documents = True
-                    print(f"Found {doc_count} documents!")
-                    
-                    # Show sample
-                    docs = docs_data.get('documents', [])
-                    ids = docs_data.get('ids', [])
-                    
-                    for i, (doc_id, doc) in enumerate(zip(ids[:2], docs[:2])):
-                        print(f"Doc {i+1} ID: {doc_id}")
-                        print(f"Preview: {doc[:150]}...")
-                    
-                    # Test a query
-                    test_queries = ["document",  "analysis"]
-                    for query in test_queries:
-                        docs_result, found = self.get_relevant_documents(query, collection_name)
-                        if found:
-                            print(f"   ✅ Test query '{query}': Found {len(docs_result)} documents")
-                            return True
-                        
-            except Exception as e:
-                print(f"Error accessing collection: {e}")
         
 
     def get_llm_service(self, model_name: str):
         """Get LLM service for the specified model"""
         model_name = model_name.lower()
-        if model_name in ["gpt4", "gpt-4", "gpt-3.5", "gpt-3.5-turbo"]:
+        if model_name in ["gpt-4", "gpt-3.5", "gpt-3.5-turbo"]:
             return get_llm(model_name=model_name)
-        elif model_name in ["llama", "llama3"]:
-            return get_llm(model_name=model_name)
+        # elif model_name in ["llama", "llama3"]:
+        #     return get_llm(model_name=model_name)
         else:
             raise ValueError(f"Unsupported model: {model_name}")
 
         
-    def process_agent_with_rag(self, agent: Dict[str, Any], query_text: str, collection_name: str, session_id: str, db: Session) -> Dict[str, Any]:
-        """Process query with agent using RAG via API"""
+    def process_agent_with_rag(self, agent: Dict[str, Any], query_text: str, collection_name: str, session_id: str, db: Session, include_citations: bool = True) -> Dict[str, Any]:
+        """
+        Process query with agent using RAG via API with document citations.
+
+        Args:
+            agent: Agent configuration dict
+            query_text: User query
+            collection_name: Vector DB collection name
+            session_id: Session ID for logging
+            db: Database session
+            include_citations: If True, includes document citations with similarity scores
+
+        Returns:
+            Dict with agent response and metadata
+        """
         start_time = time.time()
-        
+
         try:
-            print(f"🤖 Processing with agent: {agent['name']} using model: {agent['model_name']}")
-            
-            # Try to get relevant documents via API
-            relevant_docs, docs_found = self.get_relevant_documents(query_text, collection_name)
-            
+            logger.info(f"Processing with agent: {agent['name']} using model: {agent['model_name']}")
+
+            # Try to get relevant documents via API with metadata
+            relevant_docs, docs_found, metadata_list = self.get_relevant_documents(
+                query=query_text,
+                collection_name=collection_name,
+                include_metadata=include_citations
+            )
+
             # Get LLM for this agent
             llm = self.get_llm_service(agent["model_name"])
-            
+
             if docs_found and relevant_docs:
-                print(f"✅ Using RAG mode with {len(relevant_docs)} documents")
-                
+                logger.info(f"Using RAG mode with {len(relevant_docs)} documents")
+
                 # Create context from retrieved documents
                 context = "\n\n---DOCUMENT SEPARATOR---\n\n".join(relevant_docs)
-                
+
                 # Enhanced RAG prompt
                 enhanced_content = f"""KNOWLEDGE BASE CONTEXT:
 {context}
 
 USER QUERY: {query_text}
 
-INSTRUCTIONS: 
+INSTRUCTIONS:
 1. Carefully analyze the provided knowledge base context above
 2. Use information from the context to inform your analysis of the user query
 3. If the context contains relevant information, cite or reference it in your response
 4. If the context is not directly relevant, acknowledge this and proceed with your general knowledge
 5. Provide a comprehensive analysis that combines context information with your expertise"""
-                
+
                 formatted_user_prompt = agent["user_prompt_template"].replace("{data_sample}", enhanced_content)
-                
+
                 full_prompt = f"{agent['system_prompt']}\n\n{formatted_user_prompt}"
-                
+
                 # Use direct LLM invoke (like chat endpoint)
-                from langchain_core.messages import HumanMessage
                 response = llm.invoke([HumanMessage(content=full_prompt)])
-                
+
                 # Handle both response types
                 if hasattr(response, 'content'):
                     final_response = response.content
                 else:
                     final_response = str(response)
-                
+
                 response_time_ms = int((time.time() - start_time) * 1000)
                 processing_method = f"rag_enhanced_{agent['model_name']}"
-                
-                rag_info = f"\n\n---\n**RAG Information**: Used {len(relevant_docs)} relevant documents from collection '{collection_name}' with {agent['model_name']} model."
-                final_response = final_response + rag_info
-                
+
+                # Append document citations instead of simple info
+                if include_citations and metadata_list:
+                    citations = self._format_document_citations(metadata_list)
+                    final_response = final_response + citations
+                else:
+                    # Fallback to simple info if citations not requested
+                    rag_info = f"\n\n---\n**RAG Information**: Used {len(relevant_docs)} relevant documents from collection '{collection_name}' with {agent['model_name']} model."
+                    final_response = final_response + rag_info
+
             else:
-                print(f"Using Direct LLM mode - no relevant documents found")
-                
+                logger.info(f"Using Direct LLM mode - no relevant documents found")
+
                 formatted_user_prompt = agent["user_prompt_template"].replace("{data_sample}", query_text)
                 full_prompt = f"{agent['system_prompt']}\n\n{formatted_user_prompt}"
-                
+
                 # Use direct LLM invoke
-                from langchain_core.messages import HumanMessage
                 response = llm.invoke([HumanMessage(content=full_prompt)])
-                
+
                 # Handle both response types
                 if hasattr(response, 'content'):
                     final_response = response.content
                 else:
                     final_response = str(response)
-                
+
                 response_time_ms = int((time.time() - start_time) * 1000)
                 processing_method = f"direct_{agent['model_name']}"
-                
+
                 direct_info = f"\n\n---\n**Direct LLM Information**: No relevant documents found in collection '{collection_name}'. Used {agent['model_name']} model directly."
                 final_response = final_response + direct_info
-            
-            log_agent_response(
+
+            # Log agent response and get the response ID
+            agent_response_id = log_agent_response(
                 session_id=session_id,
                 agent_id=agent["id"],
                 response_text=final_response,
@@ -380,7 +674,12 @@ INSTRUCTIONS:
                 documents_found=len(relevant_docs) if docs_found else 0,
                 rag_context=context if docs_found and relevant_docs else None
             )
-            
+
+            # Log RAG citations if available and response was logged
+            if agent_response_id and include_citations and metadata_list:
+                log_rag_citations(agent_response_id, metadata_list)
+                logger.info(f"Logged {len(metadata_list)} citations for agent response {agent_response_id}")
+
             log_compliance_result(
                 agent_id=agent["id"],
                 data_sample=query_text,
@@ -392,7 +691,7 @@ INSTRUCTIONS:
                 model_used=agent["model_name"],
                 session_id=session_id
             )
-            
+
             return {
                 "agent_id": agent["id"],
                 "agent_name": agent["name"],
@@ -402,14 +701,12 @@ INSTRUCTIONS:
                 "rag_used": docs_found,
                 "documents_found": len(relevant_docs) if docs_found else 0
             }
-            
+
         except Exception as e:
             response_time_ms = int((time.time() - start_time) * 1000)
             error_response = f"Error processing with agent {agent['name']}: {str(e)}"
-            print(f"Error in process_agent_with_rag: {e}")
-            import traceback
-            traceback.print_exc()
-            
+            logger.error(f"Error in process_agent_with_rag: {e}", exc_info=True)
+
             return {
                 "agent_id": agent["id"],
                 "agent_name": agent["name"],
@@ -601,3 +898,15 @@ INSTRUCTIONS:
         finally:
             db.close()
         return None
+
+    def query_collection_info(self, collection_name: str) -> Dict:
+        """Get collection information"""
+        try:
+            collection = self.chroma_client.get_collection(collection_name)
+            return {
+                "name": collection.name,
+                "count": collection.count(),
+                "metadata": collection.metadata
+            }
+        except Exception as e:
+            return {"error": str(e)}

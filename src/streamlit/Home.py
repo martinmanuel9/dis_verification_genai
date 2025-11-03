@@ -1,34 +1,35 @@
 import streamlit as st
-# import requests
 import os
 import nest_asyncio
-# import datetime
-from utils import * 
 import torch
-# import base64
-# from components.upload_documents import render_upload_component
+
+from config.settings import config
+from config.env import env
+
+# Components - migrated to use new architecture internally
 from components.healthcheck_sidebar import Healthcheck_Sidebar
 from components.direct_chat import Direct_Chat
 from components.agent_sim import Agent_Sim
 from components.ai_agent import AI_Agent
 from components.document_generator import Document_Generator
+from components.rag_assessment import rag_assessment_dashboard
 from components.session_history import Session_History
 
 torch.classes.__path__ = []
 nest_asyncio.apply()
 
-#  API endpoints
-FASTAPI_API = os.getenv("FASTAPI_URL", "http://localhost:9020")
-CHROMADB_API = os.getenv("CHROMA_URL", "http://localhost:8020") 
-CHAT_ENDPOINT = f"{FASTAPI_API}/chat"
-HISTORY_ENDPOINT = f"{FASTAPI_API}/chat-history"
-HEALTH_ENDPOINT = f"{FASTAPI_API}/health"
-OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
+# Use centralized config instead of duplicate endpoint definitions
+FASTAPI = config.endpoints.base
+CHROMADB_API = config.endpoints.vectordb
+CHAT_ENDPOINT = config.endpoints.chat
+HISTORY_ENDPOINT = config.endpoints.history
+HEALTH_ENDPOINT = config.endpoints.health
+OPEN_AI_API_KEY = env.openai_api_key
 
 # THIS MUST BE THE VERY FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="AI Assistant", layout="wide")
+st.set_page_config(page_title="ClaimPilot", layout="wide")
 
-st.title("AI Assistant")
+st.title("ClaimPilot")
 
 # Initialize session state
 if 'health_status' not in st.session_state:
@@ -55,7 +56,7 @@ Healthcheck_Sidebar()
 # Chat mode selection
 chat_mode = st.radio(
     "Select Mode:",
-    ["Direct Chat", "AI Agent Simulation", "AI Agents", "Document Generator", "Session History"],
+    ["Direct Chat", "AI Agent Simulation", "AI Agents", "Document Generator", "RAG Assessment", "Session History"],
     horizontal=True
 )
 
@@ -83,14 +84,22 @@ elif chat_mode == "AI Agents":
     # Footer for create agent section
     st.warning("**Agent Disclaimer**: All created agents provide analysis for informational purposes only and do not constitute advice.")
     st.info("**Data Security**: Ensure all content processed by agents complies with your organization's data protection and confidentiality policies.")
-    
+
+
 # ----------------------------------------------------------------------
 # DOCUMENT GENERATOR MODE
 # ----------------------------------------------------------------------
 elif chat_mode == "Document Generator":
     st.markdown("---")
     Document_Generator()
-    
+
+# ----------------------------------------------------------------------
+# RAG ASSESSMENT MODE
+# ----------------------------------------------------------------------
+elif chat_mode == "RAG Assessment":
+    st.markdown("---")
+    rag_assessment_dashboard()
+
 # ----------------------------------------------------------------------
 # SESSION HISTORY & ANALYTICS MODE
 # ----------------------------------------------------------------------

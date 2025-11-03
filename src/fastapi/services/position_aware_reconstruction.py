@@ -93,6 +93,10 @@ def reconstruct_document_with_positions(
         # If no image_positions, try legacy format
         if not image_positions:
             image_positions = extract_images_from_legacy_metadata(md)
+            if image_positions:
+                logger.info(f"Chunk {md.get('chunk_index', '?')}: Using legacy format, found {len(image_positions)} images")
+        else:
+            logger.info(f"Chunk {md.get('chunk_index', '?')}: Found {len(image_positions)} images in position-aware format")
 
         # Reconstruct content with images at correct positions
         if image_positions:

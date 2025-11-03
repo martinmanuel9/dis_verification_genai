@@ -1362,6 +1362,16 @@ def run_ingest_job(
                     )
                 )
 
+                # 2b) Merge descriptions back into image dicts for position-aware chunking
+                for page in pages_data:
+                    images = page.get("images", [])
+                    descriptions = page.get("image_descriptions", [])
+
+                    # Merge descriptions into image dictionaries
+                    for i, img in enumerate(images):
+                        if isinstance(img, dict) and i < len(descriptions):
+                            img["description"] = descriptions[i]
+
                 # 3) Build chunks using position-aware wrapper
                 chunks = create_chunks_with_position_support(
                     ext=ext,

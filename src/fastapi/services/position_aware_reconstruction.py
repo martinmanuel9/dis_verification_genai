@@ -151,8 +151,14 @@ def insert_images_at_positions(
     insertions = []
 
     for img_pos in sorted_images:
+        # Log image position details for debugging
+        logger.info(f"Processing image: {img_pos.get('filename', 'unknown')}, "
+                   f"has description: {bool(img_pos.get('description', ''))}, "
+                   f"char_offset: {img_pos.get('char_offset', 'N/A')}")
+
         # Generate image markdown
         img_markdown = generate_image_markdown(img_pos, base_image_url, len(all_images) + 1)
+        logger.info(f"Generated markdown length: {len(img_markdown)} chars")
 
         # Determine insertion position
         position = determine_insertion_position(img_pos, content)
@@ -178,6 +184,7 @@ def insert_images_at_positions(
 
     # Insert images in reverse order (to preserve positions)
     insertions.sort(key=lambda x: x[0], reverse=True)
+    logger.info(f"Inserting {len(insertions)} images into content (length: {len(content)} chars)")
 
     result = content
     for position, img_markdown, img_pos in insertions:
@@ -190,7 +197,9 @@ def insert_images_at_positions(
             img_markdown = f'<div style="float: left; margin: 10px;">\n{img_markdown}\n</div>\n'
 
         result = result[:position] + "\n" + img_markdown + "\n" + result[position:]
+        logger.debug(f"Inserted image at position {position}, result now {len(result)} chars")
 
+    logger.info(f"After inserting images: content length changed from {len(content)} to {len(result)} chars")
     return result
 
 

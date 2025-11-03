@@ -345,8 +345,18 @@ class WordExportService:
             raise e
     
     def export_reconstructed_document_to_word(self, reconstructed: Dict[str, Any]) -> bytes:
-        """Export a reconstructed document (text + optional images) to a Word document."""
+        """
+        Export a reconstructed document (text + optional images) to a Word document.
+
+        Supports position-aware image placement by parsing markdown image syntax ![alt](url)
+        and inserting images inline at their correct positions.
+        """
         try:
+            import re
+            import tempfile
+            import requests
+            from docx.shared import Inches
+
             doc = Document()
             self._setup_document_styles(doc)
 
@@ -354,57 +364,76 @@ class WordExportService:
             title = doc.add_heading(title_text, 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Render reconstructed content with simple markdown-like handling
+            # Get reconstructed content with position-aware images
             content = reconstructed.get('reconstructed_content', '') or ''
+
+            # Use correct image storage path (FastAPI service, not ChromaDB)
+            IMAGES_DIR = os.path.join(os.getcwd(), "stored_images")
+
+            # Parse markdown line by line, handling inline images
+            # Pattern for markdown images: ![alt text](url)
+            image_pattern = r'!\[([^\]]*)\]\(([^\)]+)\)'
+
             for line in content.splitlines():
                 l = (line or '').strip()
                 if not l:
                     doc.add_paragraph("")
                     continue
-                if l.startswith('### '):
+
+                # Check if line contains an image
+                image_match = re.search(image_pattern, l)
+                if image_match:
+                    # Handle line with inline image
+                    alt_text = image_match.group(1)
+                    image_url = image_match.group(2)
+
+                    # Extract filename from URL
+                    filename = image_url.split('/')[-1] if '/' in image_url else image_url
+
+                    # Add text before image
+                    text_before = l[:image_match.start()].strip()
+                    if text_before:
+                        doc.add_paragraph(text_before)
+
+                    # Try to add the image
+                    try:
+                        image_path = os.path.join(IMAGES_DIR, filename)
+                        if os.path.exists(image_path):
+                            doc.add_picture(image_path, width=Inches(5.5))
+                            # Add caption if present
+                            if alt_text:
+                                para = doc.add_paragraph(alt_text)
+                                para.style = 'Intense Quote'
+                        else:
+                            logger.warning(f"Image not found: {filename}")
+                            doc.add_paragraph(f"[Image: {alt_text or filename}]")
+                    except Exception as e:
+                        logger.error(f"Failed to insert image {filename}: {e}")
+                        doc.add_paragraph(f"[Image: {alt_text or filename}]")
+
+                    # Add text after image
+                    text_after = l[image_match.end():].strip()
+                    if text_after:
+                        doc.add_paragraph(text_after)
+
+                    # Check for caption on next line (markdown italic format)
+                    # This is handled inline above with alt_text
+
+                # Handle regular markdown formatting
+                elif l.startswith('### '):
                     doc.add_heading(l[4:].strip(), level=3)
                 elif l.startswith('## '):
                     doc.add_heading(l[3:].strip(), level=2)
                 elif l.startswith('# '):
                     doc.add_heading(l[2:].strip(), level=1)
-                elif l.startswith(('-', '*', '•')):
+                elif l.startswith(('-', '*', '•')) and not l.startswith('*'):
                     doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
+                elif l.startswith('*') and l.endswith('*') and not l.startswith('**'):
+                    # Skip standalone italic caption lines (already handled with images)
+                    para = doc.add_paragraph(l.strip('*').strip())
+                    para.style = 'Intense Quote'
                 else:
                     doc.add_paragraph(l)
-
-            # Optional: embed images
-            images = reconstructed.get('images') or []
-            if images:
-                doc.add_page_break()
-                doc.add_heading('Images', level=1)
-                CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8000")
-                import tempfile
-                from docx.shared import Inches
-                for idx, img in enumerate(images, 1):
-                    filename = img.get('filename')
-                    desc = img.get('description') or ''
-                    try:
-                        import requests
-                        resp = requests.get(f"{CHROMA_URL}/images/{filename}", timeout=15)
-                        if resp.ok:
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
-                                tf.write(resp.content)
-                                temp_path = tf.name
-                            doc.add_picture(temp_path, width=Inches(5.5))
-                            if desc:
-                                para = doc.add_paragraph(desc)
-                                para.style = 'Quote'
-                            os.unlink(temp_path)
-                        else:
-                            doc.add_paragraph(f"[Image '{filename}' not available]")
-                            if desc:
-                                para = doc.add_paragraph(desc)
-                                para.style = 'Quote'
-                    except Exception as e:
-                        doc.add_paragraph(f"[Failed to load image '{filename}': {e}]")
-                        if desc:
-                            para = doc.add_paragraph(desc)
-                            para.style = 'Quote'
 
             return self._document_to_bytes(doc)
         except Exception as e:

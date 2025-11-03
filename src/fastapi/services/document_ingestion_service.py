@@ -421,7 +421,20 @@ async def describe_images_for_pages(
 ) -> List[Dict]:
     for page in pages_data:
         descs = []
-        for img_path in page["images"]:
+        for img_item in page["images"]:
+            # Handle both legacy (string path) and position-aware (dict) formats
+            if isinstance(img_item, dict):
+                # Position-aware format: extract storage_path from dictionary
+                img_path = img_item.get("storage_path", "")
+            else:
+                # Legacy format: img_item is already the path string
+                img_path = img_item
+
+            if not img_path:
+                logger.warning(f"Skipping image with no path: {img_item}")
+                descs.append("No image path available")
+                continue
+
             if run_all_models:
                 all_desc = {}
                 if "openai" in enabled_models and vision_flags.get("openai", False):
@@ -1366,9 +1379,15 @@ def run_ingest_job(
 
                 # Validate chunks were created
                 if not chunks:
-                    logger.error(f"No chunks created for {fname}, skipping document")
-                    redis_client.hset(doc_status_key, "status", "failed")
-                    continue
+                    msg = f"No chunks created for {fname}, skipping document"
+                    logger.error(msg)
+                    redis_client.hset(doc_status_key, mapping={
+                        "status": "failed",
+                        "end_time": datetime.now().isoformat(),
+                        "error_message": msg
+                    })
+                    # Raise to abort processing this document (continue is invalid here)
+                    raise RuntimeError(msg)
 
                 # Update document chunk count
                 redis_client.hset(doc_status_key, "chunks_total", len(chunks))

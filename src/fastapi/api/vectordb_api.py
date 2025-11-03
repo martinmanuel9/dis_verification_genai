@@ -473,6 +473,23 @@ def hybrid_reconstruct_document(chunks_data: List[Dict], base_image_url: str = "
     Returns:
         Dictionary with reconstructed_content, images, metadata, and reconstruction_method
     """
+    # Validate chunks_data is not empty
+    if not chunks_data:
+        logger.warning("No chunks provided for reconstruction")
+        return {
+            "reconstructed_content": "# No content available",
+            "images": [],
+            "metadata": {
+                "file_type": "unknown",
+                "total_images": 0,
+                "processing_timestamp": "",
+                "openai_api_used": False,
+                "ocr_pages": 0,
+                "vision_models_used": [],
+                "reconstruction_method": "empty"
+            }
+        }
+
     # Check if any chunk has image_positions metadata (indicates position-aware chunking)
     has_position_data = False
     for chunk in chunks_data:
@@ -510,7 +527,7 @@ def hybrid_reconstruct_document(chunks_data: List[Dict], base_image_url: str = "
     # Legacy reconstruction
     logger.info(f"Using legacy reconstruction for {len(chunks_data)} chunks")
 
-    document_name = chunks_data[0]["metadata"].get("document_name", "UNKNOWN")
+    document_name = chunks_data[0].get("metadata", {}).get("document_name", "UNKNOWN")
     lines: list[str] = [f"# Document: {document_name}", ""]
     all_images = []
     ocr_pages = 0
@@ -580,14 +597,17 @@ def hybrid_reconstruct_document(chunks_data: List[Dict], base_image_url: str = "
 
     reconstructed_content = "\n".join(lines).strip()
 
+    # Safely extract metadata from first chunk
+    first_chunk_meta = chunks_data[0].get("metadata", {}) if chunks_data else {}
+
     return {
         "reconstructed_content": reconstructed_content,
         "images": all_images,
         "metadata": {
-            "file_type": chunks_data[0]["metadata"].get("file_type"),
+            "file_type": first_chunk_meta.get("file_type", "unknown"),
             "total_images": len(all_images),
-            "processing_timestamp": chunks_data[0]["metadata"].get("timestamp"),
-            "openai_api_used": ("openai" in vision_union) or chunks_data[0]["metadata"].get("openai_api_used", False),
+            "processing_timestamp": first_chunk_meta.get("timestamp", ""),
+            "openai_api_used": ("openai" in vision_union) or first_chunk_meta.get("openai_api_used", False),
             "ocr_pages": int(ocr_pages),
             "vision_models_used": sorted(list(vision_union)),
             "reconstruction_method": "legacy"

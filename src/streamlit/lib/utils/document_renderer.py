@@ -6,6 +6,29 @@ from config.settings import config
 import re
 
 
+def clean_markdown_formatting(text: str) -> str:
+    """Remove markdown formatting from text for display in alt text and captions."""
+    if not text:
+        return text
+
+    # Remove markdown headers
+    text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
+
+    # Remove bold/italic markers
+    text = re.sub(r'\*\*([^\*]+)\*\*', r'\1', text)  # **bold**
+    text = re.sub(r'\*([^\*]+)\*', r'\1', text)  # *italic*
+    text = re.sub(r'__([^_]+)__', r'\1', text)  # __bold__
+    text = re.sub(r'_([^_]+)_', r'\1', text)  # _italic_
+
+    # Remove # Description: prefix if present
+    text = re.sub(r'^#?\s*Description:\s*', '', text, flags=re.IGNORECASE)
+
+    # Remove Caption for Figure X: prefix
+    text = re.sub(r'^Caption\s+for\s+Figure\s+\d+:\s*', '', text, flags=re.IGNORECASE)
+
+    return text.strip()
+
+
 def render_reconstructed_document(result: dict):
     """
     Render reconstructed document with inline images properly displayed.
@@ -43,25 +66,29 @@ def render_reconstructed_document(result: dict):
                 alt_text = parts[i]
                 image_url = parts[i+1] if i+1 < len(parts) else ""
 
+                # Clean markdown formatting from alt text
+                clean_alt = clean_markdown_formatting(alt_text)
+
                 # Extract filename from URL
                 filename = image_url.split('/')[-1] if '/' in image_url else image_url
 
                 # Fetch and display image
                 try:
-                    # Use localhost URL directly
-                    image_fetch_url = f"http://localhost:9020/api/vectordb/images/{filename}"
+                    # Use FastAPI service URL (works from inside Docker and from host)
+                    # Use config.endpoints to get the correct URL
+                    image_fetch_url = f"{CHROMADB_API}/images/{filename}"
                     resp = requests.get(image_fetch_url, timeout=5)
                     resp.raise_for_status()
                     image = Image.open(BytesIO(resp.content))
 
-                    # Display image with caption
-                    st.image(image, caption=alt_text, use_column_width=True)
+                    # Display image with clean caption
+                    st.image(image, caption=clean_alt, use_column_width=True)
                     image_counter += 1
 
                 except Exception as e:
                     # Show placeholder if image can't be fetched
                     st.warning(f"⚠️ Image not available: {filename}")
-                    st.caption(f"Alt text: {alt_text}")
+                    st.caption(f"Alt text: {clean_alt}")
 
                 i += 2
 
@@ -75,7 +102,7 @@ def render_reconstructed_document(result: dict):
                 # left: actual image
                 with col1:
                     try:
-                        resp = requests.get(f"http://localhost:9020/api/vectordb/images/{img['filename']}", timeout=5)
+                        resp = requests.get(f"{CHROMADB_API}/images/{img['filename']}", timeout=5)
                         resp.raise_for_status()
                         image = Image.open(BytesIO(resp.content))
                         st.image(image, caption=img['filename'])

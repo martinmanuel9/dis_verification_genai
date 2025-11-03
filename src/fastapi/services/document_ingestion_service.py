@@ -1433,8 +1433,7 @@ def run_ingest_job(
                                 paths.append(img.get("storage_path", ""))
                                 descs.append(img.get("description", ""))
                             elif isinstance(img, str):
-                                # Legacy: img is a path string
-                                from pathlib import Path
+                                # Legacy: img is a path string (Path is imported at top of file)
                                 filenames.append(Path(img).name)
                                 paths.append(img)
                                 descs.append("")

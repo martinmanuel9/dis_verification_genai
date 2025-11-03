@@ -661,13 +661,9 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...), re
         chunks_data.sort(key=lambda x: x["chunk_index"])
 
         # Build absolute image URL for browser rendering
-        # Use request host if available, otherwise fall back to localhost
-        if request:
-            base_url = f"{request.url.scheme}://{request.url.netloc}"
-        else:
-            # Fallback for direct access or when request is not available
-            base_url = "http://localhost:9020"
-
+        # IMPORTANT: Always use localhost for browser access, not Docker internal hostname
+        # The request.url.netloc might be "fastapi:9020" (Docker internal) which browsers can't access
+        base_url = "http://localhost:9020"
         base_image_url = f"{base_url}/api/vectordb/images"
         logger.info(f"Using base_image_url: {base_image_url}")
 

@@ -82,7 +82,7 @@ def render_reconstructed_document(result: dict):
                     image = Image.open(BytesIO(resp.content))
 
                     # Display image with clean caption
-                    st.image(image, caption=clean_alt, use_column_width=True)
+                    st.image(image, caption=clean_alt, use_container_width=True)
                     image_counter += 1
 
                 except Exception as e:

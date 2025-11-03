@@ -512,12 +512,24 @@ def hybrid_reconstruct_document(chunks_data: List[Dict], base_image_url: str = "
                 base_image_url=base_image_url
             )
 
+            # Enrich metadata with fields from chunk metadata (for compatibility)
+            first_chunk_meta = chunks_data[0].get("metadata", {}) if chunks_data else {}
+
+            # Convert sets to lists for JSON serialization
+            if "pages" in metadata and isinstance(metadata["pages"], set):
+                metadata["pages"] = sorted(list(metadata["pages"]))
+            if "vision_models_used" in metadata and isinstance(metadata["vision_models_used"], set):
+                metadata["vision_models_used"] = sorted(list(metadata["vision_models_used"]))
+
             return {
                 "reconstructed_content": reconstructed_content,
                 "images": images,
                 "metadata": {
                     **metadata,
-                    "reconstruction_method": "position_aware"
+                    "reconstruction_method": "position_aware",
+                    "file_type": first_chunk_meta.get("file_type", "unknown"),
+                    "processing_timestamp": first_chunk_meta.get("timestamp", ""),
+                    "openai_api_used": first_chunk_meta.get("openai_api_used", False)
                 }
             }
         except Exception as e:
@@ -639,10 +651,10 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
         # Sort chunks by chunk index
         chunks_data = []
         for i, chunk_id in enumerate(results["ids"]):
-            metadata = results["metadatas"][i]
+            metadata = results["metadatas"][i] or {}  # Handle None metadata from ChromaDB
             chunks_data.append({
                 "chunk_index": metadata.get("chunk_index", 0),
-                "content": results["documents"][i],
+                "content": results["documents"][i] or "",
                 "metadata": metadata
             })
 
@@ -654,9 +666,14 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
             base_image_url="/api/vectordb/images"
         )
 
+        # Safe access to document name
+        doc_name = "Unknown"
+        if chunks_data and chunks_data[0].get("metadata"):
+            doc_name = chunks_data[0]["metadata"].get("document_name", "Unknown")
+
         return {
             "document_id": document_id,
-            "document_name": chunks_data[0]["metadata"].get("document_name", "Unknown"),
+            "document_name": doc_name,
             "total_chunks": len(chunks_data),
             "reconstructed_content": result["reconstructed_content"],
             "images": result["images"],

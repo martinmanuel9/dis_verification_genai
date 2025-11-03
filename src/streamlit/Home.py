@@ -27,9 +27,9 @@ HEALTH_ENDPOINT = config.endpoints.health
 OPEN_AI_API_KEY = env.openai_api_key
 
 # THIS MUST BE THE VERY FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="ClaimPilot", layout="wide")
+st.set_page_config(page_title="AI Assistant", layout="wide")
 
-st.title("ClaimPilot")
+st.title("AI Assistant")
 
 # Initialize session state
 if 'health_status' not in st.session_state:

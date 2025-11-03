@@ -628,7 +628,7 @@ def hybrid_reconstruct_document(chunks_data: List[Dict], base_image_url: str = "
 
 
 @vectordb_api_router.get("/documents/reconstruct/{document_id}")
-def reconstruct_document(document_id: str, collection_name: str = Query(...)):
+def reconstruct_document(document_id: str, collection_name: str = Query(...), request: Request = None):
     """
     Reconstruct original document from stored chunks and images, using chunk metadata
     (section titles, section types, page numbers) to format headings and structure.
@@ -660,10 +660,21 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
 
         chunks_data.sort(key=lambda x: x["chunk_index"])
 
+        # Build absolute image URL for browser rendering
+        # Use request host if available, otherwise fall back to localhost
+        if request:
+            base_url = f"{request.url.scheme}://{request.url.netloc}"
+        else:
+            # Fallback for direct access or when request is not available
+            base_url = "http://localhost:9020"
+
+        base_image_url = f"{base_url}/api/vectordb/images"
+        logger.info(f"Using base_image_url: {base_image_url}")
+
         # Use hybrid reconstruction (supports both position-aware and legacy)
         result = hybrid_reconstruct_document(
             chunks_data=chunks_data,
-            base_image_url="/api/vectordb/images"
+            base_image_url=base_image_url
         )
 
         # Safe access to document name

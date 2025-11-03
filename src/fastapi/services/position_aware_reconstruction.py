@@ -155,12 +155,14 @@ def insert_images_at_positions(
 
         insertions.append((position, img_markdown, img_pos))
 
-        # Track image
+        # Track image (include storage_path for compatibility)
         all_images.append({
             "filename": img_pos.get("filename", ""),
+            "storage_path": img_pos.get("storage_path", ""),
             "description": img_pos.get("description", ""),
             "page_number": img_pos.get("page_number"),
-            "position": img_pos.get("char_offset", 0)
+            "position": img_pos.get("char_offset", 0),
+            "exists": True  # Assume exists if in metadata
         })
 
         # Track vision models

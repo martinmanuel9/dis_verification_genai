@@ -1421,9 +1421,26 @@ def run_ingest_job(
                             "timestamp": datetime.now().isoformat(),
                         }
                         
-                        filenames = [img["filename"] for img in c.get("images", [])]
-                        paths     = [img["storage_path"] for img in c.get("images", [])]
-                        descs     = [img.get("description", "") for img in c.get("images", [])]
+                        # Safe extraction of image metadata (handles both string paths and dict objects)
+                        images_list = c.get("images", [])
+                        filenames = []
+                        paths = []
+                        descs = []
+
+                        for img in images_list:
+                            if isinstance(img, dict):
+                                filenames.append(img.get("filename", ""))
+                                paths.append(img.get("storage_path", ""))
+                                descs.append(img.get("description", ""))
+                            elif isinstance(img, str):
+                                # Legacy: img is a path string
+                                from pathlib import Path
+                                filenames.append(Path(img).name)
+                                paths.append(img)
+                                descs.append("")
+                            else:
+                                logger.warning(f"Unexpected image type: {type(img)}")
+                                continue
 
                         meta["image_filenames"]     = json.dumps(filenames)
                         meta["image_storage_paths"] = json.dumps(paths)

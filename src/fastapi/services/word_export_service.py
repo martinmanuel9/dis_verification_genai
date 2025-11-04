@@ -379,42 +379,71 @@ class WordExportService:
             # Use correct image storage path (FastAPI service, not ChromaDB)
             IMAGES_DIR = os.path.join(os.getcwd(), "stored_images")
 
-            # Parse markdown line by line, handling inline images
+            # Parse markdown handling inline images
             # Pattern for markdown images: ![alt text](url)
+            # IMPORTANT: Use re.DOTALL to match across newlines (in case image markdown spans lines)
             image_pattern = r'!\[([^\]]*)\]\(([^\)]+)\)'
 
             images_inserted = 0
             images_failed = 0
 
+            # First, find and process all images in the content
+            # Replace each image with a unique placeholder to preserve position
+            image_data = []
+            for match in re.finditer(image_pattern, content, re.DOTALL):
+                alt_text = match.group(1)
+                image_url = match.group(2)
+                placeholder = f"<<<IMAGE_{len(image_data)}>>>"
+                image_data.append({
+                    "alt_text": alt_text.strip(),
+                    "image_url": image_url.strip(),
+                    "placeholder": placeholder
+                })
+                logger.info(f"Found image {len(image_data)}: {alt_text[:50]}...")
+
+            # Replace images with placeholders
+            for img in image_data:
+                # Build the original pattern to replace
+                original = f"![{img['alt_text']}]({img['image_url']})"
+                content = content.replace(original, img['placeholder'])
+
+            # Now process line by line with placeholders
             for line in content.splitlines():
                 l = (line or '').strip()
                 if not l:
                     doc.add_paragraph("")
                     continue
 
-                # Check if line contains an image
-                image_match = re.search(image_pattern, l)
+                # Check if line contains an image placeholder
+                image_match = None
+                for idx, img in enumerate(image_data):
+                    if img['placeholder'] in l:
+                        image_match = (idx, img)
+                        break
+
                 if image_match:
-                    logger.info(f"Found image in markdown: {line[:100]}")
-                    # Handle line with inline image
-                    alt_text = image_match.group(1)
-                    image_url = image_match.group(2)
+                    idx, img = image_match
+                    alt_text = img['alt_text']
+                    image_url = img['image_url']
+                    placeholder = img['placeholder']
 
                     # Extract filename from URL
                     filename = image_url.split('/')[-1] if '/' in image_url else image_url
 
-                    # Add text before image
-                    text_before = l[:image_match.start()].strip()
+                    # Find placeholder position in line
+                    placeholder_pos = l.index(placeholder)
+
+                    # Add text before image placeholder (if any)
+                    text_before = l[:placeholder_pos].strip()
                     if text_before:
                         doc.add_paragraph(text_before)
 
                     # Try to add the image
                     try:
                         image_path = os.path.join(IMAGES_DIR, filename)
-                        logger.info(f"Looking for image at: {image_path}")
+                        logger.info(f"✅ Inserting image {idx+1}/{len(image_data)}: {filename}")
 
                         if os.path.exists(image_path):
-                            logger.info(f"✅ Image found, inserting: {filename}")
                             doc.add_picture(image_path, width=Inches(5.5))
                             images_inserted += 1
                             # Add caption if present
@@ -430,13 +459,10 @@ class WordExportService:
                         doc.add_paragraph(f"[Image: {alt_text or filename}]")
                         images_failed += 1
 
-                    # Add text after image
-                    text_after = l[image_match.end():].strip()
+                    # Add text after image placeholder (if any)
+                    text_after = l[placeholder_pos + len(placeholder):].strip()
                     if text_after:
                         doc.add_paragraph(text_after)
-
-                    # Check for caption on next line (markdown italic format)
-                    # This is handled inline above with alt_text
 
                 # Handle regular markdown formatting
                 elif l.startswith('### '):

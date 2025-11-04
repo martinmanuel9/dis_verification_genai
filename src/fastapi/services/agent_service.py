@@ -51,14 +51,6 @@ class AgentService:
         except Exception as e:
             print(f"Failed to initialize compliance parser: {e}")
         
-        # Initialize legal research service for agent integration
-        try:
-            from services.legal_research_service import LegalResearchService
-            self.legal_research_service = LegalResearchService()
-            print("Legal research service initialized for agents")
-        except Exception as e:
-            print(f"Failed to initialize legal research service: {e}")
-            self.legal_research_service = None
 
     
     def get_llm_for_agent(self, model_name: str):

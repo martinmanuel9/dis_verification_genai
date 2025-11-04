@@ -18,10 +18,10 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
 
     # Select templates based on category (imported from agent_template module)
     templates = rule_development_templates if template_category == "rule_development" else general_templates
-    
+
     # Template selection OUTSIDE the form to allow dynamic updates
     col1_pre, col2_pre = st.columns([2, 1])
-    
+
     with col1_pre:
         selected_template = st.selectbox(
             "Choose Agent Template:",
@@ -29,6 +29,25 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
             key=pref("template_selector"),
             help="Select a template to auto-populate the form fields"
         )
+
+    # Clear form fields when template changes
+    template_state_key = pref("current_template")
+    if template_state_key not in st.session_state:
+        st.session_state[template_state_key] = selected_template
+    elif st.session_state[template_state_key] != selected_template:
+        # Template changed - clear all form-related session state
+        st.session_state[template_state_key] = selected_template
+        # Clear form field keys to allow repopulation
+        keys_to_clear = [
+            pref("agent_name"), pref("model_select"), pref("temperature"),
+            pref("max_tokens"), pref("system_prompt"), pref("user_prompt"),
+            pref("harvard_legal"), pref("google_scholar_legal"),
+            pref("courtlistener_legal"), pref("justia_legal"), pref("legal_collection")
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
     
     with col2_pre:
         if selected_template != "Custom":

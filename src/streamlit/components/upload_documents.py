@@ -124,10 +124,10 @@ def view_images(key_prefix: str = "",):
 
                 # Store result in session state
                 st.session_state[result_key] = result
-                st.success(f"✅ Document reconstructed: {result['document_name']}")
+                st.success(f"Document reconstructed: {result['document_name']}")
 
             except Exception as e:
-                st.error(f"❌ Error reconstructing document: {str(e)}")
+                st.error(f"Error reconstructing document: {str(e)}")
 
         # Display reconstruction result if it exists (outside button conditional)
         if st.session_state[result_key]:
@@ -151,7 +151,7 @@ def view_images(key_prefix: str = "",):
 
             # ---- EXPORT DOCUMENTS (SEPARATE SECTION) ----
             st.markdown("---")  # Visual separator
-            st.subheader("📄 Export Document")
+            st.subheader("Export Document")
 
             # Initialize session state for export cache
             export_state_key = pref("export_word_data")
@@ -168,7 +168,7 @@ def view_images(key_prefix: str = "",):
             if needs_generation:
                 # Auto-generate on first display or when document changes
                 try:
-                    with st.spinner("🔄 Generating Word document..."):
+                    with st.spinner("Generating Word document..."):
                         export_resp = requests.post(
                             f"{config.endpoints.doc_gen}/export-reconstructed-word",
                             json=result,
@@ -188,19 +188,19 @@ def view_images(key_prefix: str = "",):
                             "filename": filename,
                             "document_id": result["document_id"]
                         }
-                        st.success("✅ Word document generated!")
+                        st.success("Word document generated!")
                     else:
-                        st.error("❌ No file returned from export service.")
+                        st.error("No file returned from export service.")
                         st.session_state[export_state_key] = None
                 except Exception as e:
-                    st.error(f"❌ Error generating Word document: {e}")
+                    st.error(f"Error generating Word document: {e}")
                     st.session_state[export_state_key] = None
 
             # Show download button if export data exists
             if st.session_state[export_state_key]:
                 export_data = st.session_state[export_state_key]
                 st.download_button(
-                    label=f"📥 Download {export_data['filename']}",
+                    label=f"Download {export_data['filename']}",
                     data=export_data["data"],
                     file_name=export_data["filename"],
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -208,7 +208,6 @@ def view_images(key_prefix: str = "",):
                     use_container_width=False,
                     type="primary"
                 )
-                st.info("💡 Click the button above to download your Word document with inline images.")
 
 def render_upload_component(
     available_collections: list[str],

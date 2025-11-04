@@ -367,6 +367,15 @@ class WordExportService:
             # Get reconstructed content with position-aware images
             content = reconstructed.get('reconstructed_content', '') or ''
 
+            # Debug: Log content stats
+            total_lines = len(content.splitlines())
+            logger.info(f"Reconstructed content: {len(content)} chars, {total_lines} lines")
+
+            # Debug: Count how many image markers exist
+            import re as re_module
+            image_count = len(re_module.findall(r'!\[', content))
+            logger.info(f"Found {image_count} image markers (![) in reconstructed content")
+
             # Use correct image storage path (FastAPI service, not ChromaDB)
             IMAGES_DIR = os.path.join(os.getcwd(), "stored_images")
 

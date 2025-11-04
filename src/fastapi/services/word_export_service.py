@@ -438,12 +438,23 @@ class WordExportService:
                     doc.add_heading(l[2:].strip(), level=1)
                 elif l.startswith(('-', '*', '•')) and not l.startswith('*'):
                     doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
-                elif l.startswith('*') and l.endswith('*') and not l.startswith('**'):
-                    # Skip standalone italic caption lines (already handled with images)
-                    para = doc.add_paragraph(l.strip('*').strip())
-                    para.style = 'Intense Quote'
+                elif l.startswith('*') and l.endswith('*') and not l.startswith('**') and len(l) > 2:
+                    # Italic caption line (from markdown)
+                    # Don't add if it's just after an image (avoid duplicate captions)
+                    pass  # Skip these as they're handled in alt_text
                 else:
-                    doc.add_paragraph(l)
+                    # Regular paragraph - handle bold formatting
+                    if '**' in l and l.count('**') >= 2:
+                        # Has bold text
+                        para = doc.add_paragraph()
+                        parts = l.split('**')
+                        for i, part in enumerate(parts):
+                            if part:
+                                run = para.add_run(part)
+                                if i % 2 == 1:  # Odd indices are bold
+                                    run.bold = True
+                    else:
+                        doc.add_paragraph(l)
 
             logger.info(f"Word export complete: {images_inserted} images inserted, {images_failed} failed")
             return self._document_to_bytes(doc)
@@ -498,20 +509,78 @@ class WordExportService:
             raise e
     
     def _setup_document_styles(self, doc: Document):
-        """Set up custom styles for the document."""
+        """Set up custom styles for professional-looking document."""
         try:
-            # Create custom styles
+            # Set document-wide font defaults
             styles = doc.styles
-            
-            # Quote style
-            if 'Quote' not in [style.name for style in styles]:
+
+            # Configure Normal style (base for all paragraphs)
+            normal_style = styles['Normal']
+            normal_font = normal_style.font
+            normal_font.name = 'Calibri'
+            normal_font.size = Pt(11)
+            normal_style.paragraph_format.space_after = Pt(10)
+            normal_style.paragraph_format.line_spacing = 1.15
+
+            # Configure heading styles
+            for level in range(1, 4):
+                heading_style = styles[f'Heading {level}']
+                heading_font = heading_style.font
+                heading_font.name = 'Calibri'
+                heading_font.bold = True
+                heading_font.color.rgb = None  # Keep default blue
+
+                if level == 1:
+                    heading_font.size = Pt(16)
+                    heading_style.paragraph_format.space_before = Pt(18)
+                    heading_style.paragraph_format.space_after = Pt(12)
+                elif level == 2:
+                    heading_font.size = Pt(14)
+                    heading_style.paragraph_format.space_before = Pt(12)
+                    heading_style.paragraph_format.space_after = Pt(6)
+                elif level == 3:
+                    heading_font.size = Pt(12)
+                    heading_style.paragraph_format.space_before = Pt(10)
+                    heading_style.paragraph_format.space_after = Pt(6)
+
+            # Quote/Caption style for image captions
+            if 'Quote' not in [s.name for s in styles]:
                 quote_style = styles.add_style('Quote', WD_STYLE_TYPE.PARAGRAPH)
-                quote_font = quote_style.font
-                quote_font.italic = True
-                quote_font.size = Pt(10)
-                quote_style.paragraph_format.left_indent = Inches(0.5)
-                quote_style.paragraph_format.right_indent = Inches(0.5)
-        except:
+            else:
+                quote_style = styles['Quote']
+
+            quote_font = quote_style.font
+            quote_font.name = 'Calibri'
+            quote_font.italic = True
+            quote_font.size = Pt(10)
+            quote_font.color.theme_color = 8  # Gray
+            quote_style.paragraph_format.left_indent = Inches(0.25)
+            quote_style.paragraph_format.space_after = Pt(12)
+
+            # Intense Quote for image captions (darker, centered)
+            if 'Intense Quote' not in [s.name for s in styles]:
+                intense_quote_style = styles.add_style('Intense Quote', WD_STYLE_TYPE.PARAGRAPH)
+            else:
+                intense_quote_style = styles['Intense Quote']
+
+            intense_quote_font = intense_quote_style.font
+            intense_quote_font.name = 'Calibri'
+            intense_quote_font.italic = True
+            intense_quote_font.size = Pt(10)
+            intense_quote_font.color.theme_color = 8
+            intense_quote_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            intense_quote_style.paragraph_format.space_after = Pt(12)
+
+            # Set document margins
+            sections = doc.sections
+            for section in sections:
+                section.top_margin = Inches(1)
+                section.bottom_margin = Inches(1)
+                section.left_margin = Inches(1)
+                section.right_margin = Inches(1)
+
+        except Exception as e:
+            logger.warning(f"Failed to set up document styles: {e}")
             pass  # Ignore styling errors
     
     def _setup_document_styles_optimized(self, doc: Document):

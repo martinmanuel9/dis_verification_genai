@@ -21,7 +21,6 @@ from .document_generation_api import doc_gen_api_router
 from .analytics_api import analytics_api_router
 from .chromadb_api import chromadb_api_router
 from .redis_api import redis_api_router
-from .legal_assist_api import legal_assist_api_router
 
 __all__ = [
     "chat_api_router",

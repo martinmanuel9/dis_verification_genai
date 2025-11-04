@@ -30,6 +30,17 @@ import functools
 from zipfile import ZipFile
 from bs4 import BeautifulSoup
 
+# Position-aware image placement imports
+from .position_aware_extraction import (
+    extract_images_with_positions,
+    add_text_anchors_to_images
+)
+from .position_aware_chunking import (
+    page_based_chunking_with_positions,
+    section_based_chunking_with_positions,
+    merge_images_with_descriptions
+)
+
 logger = logging.getLogger("DOC_INGESTION_SERVICE")
 
 load_dotenv()
@@ -80,10 +91,14 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # ChromaDB persistence directory (for legacy compatibility)
 PERSIST_DIR = os.getenv("PERSIST_DIRECTORY", "/chroma/chroma")
 
+# Feature flag for position-aware extraction and chunking
+USE_POSITION_AWARE = os.getenv("USE_POSITION_AWARE_EXTRACTION", "true").lower() == "true"
+
 logger.info("Document Ingestion Service initialized")
 logger.info(f"ChromaDB: {CHROMA_HOST}:{CHROMA_PORT}")
 logger.info(f"Embedding model: {EMBEDDING_MODEL_NAME}")
 logger.info(f"Redis: {REDIS_URL}")
+logger.info(f"Position-aware extraction: {'ENABLED' if USE_POSITION_AWARE else 'DISABLED'}")
 
 
 # =============================================================================
@@ -406,7 +421,20 @@ async def describe_images_for_pages(
 ) -> List[Dict]:
     for page in pages_data:
         descs = []
-        for img_path in page["images"]:
+        for img_item in page["images"]:
+            # Handle both legacy (string path) and position-aware (dict) formats
+            if isinstance(img_item, dict):
+                # Position-aware format: extract storage_path from dictionary
+                img_path = img_item.get("storage_path", "")
+            else:
+                # Legacy format: img_item is already the path string
+                img_path = img_item
+
+            if not img_path:
+                logger.warning(f"Skipping image with no path: {img_item}")
+                descs.append("No image path available")
+                continue
+
             if run_all_models:
                 all_desc = {}
                 if "openai" in enabled_models and vision_flags.get("openai", False):
@@ -587,6 +615,56 @@ def extract_and_store_images_from_file(file_content: bytes, filename: str, temp_
 
     logger.info(f"Total images extracted from {filename}: {sum(len(p['images']) for p in pages_data)}")
     return pages_data
+
+
+def extract_images_with_position_support(
+    file_content: bytes,
+    filename: str,
+    temp_dir: str,
+    doc_id: str,
+    use_positions: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Wrapper that supports both legacy and position-aware extraction.
+
+    Args:
+        file_content: PDF file bytes
+        filename: Original filename
+        temp_dir: Temporary directory
+        doc_id: Document ID
+        use_positions: If True, use position-aware extraction
+
+    Returns:
+        List of page data with images
+    """
+    if use_positions and USE_POSITION_AWARE:
+        logger.info(f"Using position-aware extraction for {filename}")
+        try:
+            pages_data = extract_images_with_positions(
+                file_content=file_content,
+                filename=filename,
+                temp_dir=temp_dir,
+                doc_id=doc_id,
+                images_dir=IMAGES_DIR
+            )
+
+            # Add text anchors for better position matching
+            pages_data = add_text_anchors_to_images(
+                pages_data,
+                context_chars=100
+            )
+
+            logger.info(f"Position-aware extraction successful: {sum(len(p['images']) for p in pages_data)} images")
+            return pages_data
+
+        except Exception as e:
+            logger.error(f"Position-aware extraction failed, falling back to legacy: {e}")
+            # Fall through to legacy extraction
+
+    # Legacy extraction (current implementation)
+    logger.info(f"Using legacy extraction for {filename}")
+    return extract_and_store_images_from_file(file_content, filename, temp_dir, doc_id)
+
 
 def extract_text_by_page(file_content: bytes, filename: str, temp_dir: str) -> List[Dict]:
     """Extract text per page from a PDF using PyPDF2."""
@@ -1045,7 +1123,146 @@ def process_document_with_context_multi_model(file_content: bytes,
         "images_data": images_data,
         "file_type": file_extension
     }
-    
+
+
+
+def create_chunks_with_position_support(
+    ext: str,
+    pages_data: List[Dict],
+    fname: str,
+    content: bytes,
+    tmp_dir: str,
+    openai_api_key: Optional[str],
+    vision_models: List[str],
+    chunk_size: int,
+    chunk_overlap: int,
+    enable_ocr: bool,
+    use_positions: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Create chunks with optional position preservation.
+
+    For PDFs with position-aware extraction enabled, uses position-aware chunking.
+    Otherwise, falls back to legacy chunking logic.
+
+    Args:
+        ext: File extension (.pdf, .docx, etc.)
+        pages_data: Page data from extraction (with or without positions)
+        fname: Filename
+        content: File content bytes
+        tmp_dir: Temporary directory
+        openai_api_key: OpenAI API key
+        vision_models: List of vision models to use
+        chunk_size: Chunk size for text splitting
+        chunk_overlap: Chunk overlap for text splitting
+        enable_ocr: Whether OCR is enabled
+        use_positions: Whether to use position-aware chunking
+
+    Returns:
+        List of chunk dictionaries
+    """
+    # Check if we should use position-aware chunking
+    if use_positions and USE_POSITION_AWARE and ext == ".pdf":
+        logger.info(f"Using position-aware chunking for {fname}")
+        try:
+            # Use position-aware chunking from the new module
+            chunks = page_based_chunking_with_positions(
+                pages_data=pages_data,
+                document_name=fname
+            )
+            logger.info(f"Position-aware chunking created {len(chunks)} chunks for {fname}")
+            return chunks
+        except Exception as e:
+            logger.error(f"Position-aware chunking failed for {fname}, falling back to legacy: {e}")
+            # Fall through to legacy chunking
+
+    # Legacy chunking logic
+    logger.info(f"Using legacy chunking for {fname}")
+
+    use_page_chunking = True if ext == ".pdf" else False
+
+    if use_page_chunking:
+        # Extract page texts and correlate with images
+        page_texts = extract_text_by_page(content, fname, tmp_dir)
+        page_text_map = {p["page"]: (p.get("text") or "") for p in page_texts}
+
+        chunks = []
+        for page in pages_data:
+            pg = page.get("page") or 0
+            pg_text = page_text_map.get(pg, "")
+            img_list = []
+            for img_path, desc in zip(page.get("images", []), page.get("image_descriptions", [])):
+                img_list.append({
+                    "filename": Path(img_path).name,
+                    "storage_path": img_path,
+                    "description": desc,
+                })
+            page_ocr_used = False
+            # OCR fallback if no text extracted
+            if enable_ocr and not (pg_text or "").strip() and img_list:
+                ocr_texts = []
+                for img in img_list:
+                    try:
+                        with Image.open(img["storage_path"]) as im:
+                            ocr_text = pytesseract.image_to_string(im)
+                            if ocr_text and ocr_text.strip():
+                                ocr_texts.append(ocr_text.strip())
+                    except Exception as e:
+                        logger.warning(f"OCR failed for image {img['filename']}: {e}")
+                if ocr_texts:
+                    pg_text = "\n".join(ocr_texts)
+                    page_ocr_used = True
+            # Ensure we have some minimal content to embed
+            if not (pg_text or "").strip():
+                pg_text = f"Page {pg}: [no extractable text]"
+            chunks.append({
+                "content": pg_text.strip(),
+                "chunk_index": max(0, int(pg) - 1),
+                "images": img_list,
+                "page_number": pg,
+                "section_type": "page",
+                "section_title": "",
+                "has_images": len(img_list) > 0,
+                "ocr_used": page_ocr_used,
+                "start_position": 0,
+                "end_position": len(pg_text or ""),
+            })
+        logger.info(f"Legacy page-based chunking created {len(chunks)} chunks for {fname}")
+    else:
+        # full-document processing for non-PDF files
+        doc_data = process_document_with_context_multi_model(
+            file_content=content,
+            filename=fname,
+            temp_dir=tmp_dir,
+            doc_id=fname,
+            openai_api_key=openai_api_key,
+            run_all_models=len(vision_models) > 1,
+            selected_models=set(vision_models),
+            vision_flags={m: (m in vision_models) for m in vision_models},
+        )
+
+        # Structure-preserving processing → embed → insert
+        try:
+            if use_structure_preserving_upload():
+                logger.info(f"Using structure-preserving upload for {fname}")
+                chunks = structure_preserving_process(doc_data["content"],
+                                                    doc_data["images_data"],
+                                                    fname)
+                logger.info(f"Structure-preserving processing completed: {len(chunks)} chunks")
+            else:
+                # Fallback to original chunking
+                logger.info(f"Using traditional chunking for {fname}")
+                chunks = smart_chunk_with_context(doc_data["content"],
+                                              doc_data["images_data"],
+                                              chunk_size, chunk_overlap)
+                logger.info(f"Traditional chunking completed: {len(chunks)} chunks")
+        except Exception as e:
+            logger.error(f"Structure-preserving processing failed for {fname}, falling back: {e}")
+            chunks = smart_chunk_with_context(doc_data["content"],
+                                          doc_data["images_data"],
+                                          chunk_size, chunk_overlap)
+
+    return chunks
 
 
 def run_ingest_job(
@@ -1112,7 +1329,14 @@ def run_ingest_job(
             # 1) extract images and process document within same temp directory
             with tempfile.TemporaryDirectory() as tmp_dir:
                 if ext == ".pdf":
-                    pages_data = extract_and_store_images_from_file(content, fname, tmp_dir, fname)
+                    # Use position-aware extraction wrapper (falls back to legacy if needed)
+                    pages_data = extract_images_with_position_support(
+                        file_content=content,
+                        filename=fname,
+                        temp_dir=tmp_dir,
+                        doc_id=fname,
+                        use_positions=True  # Can be controlled per-request if needed
+                    )
 
                 elif ext == ".docx":
                     pages_data = extract_images_from_docx(content, fname, tmp_dir, fname)
@@ -1138,96 +1362,42 @@ def run_ingest_job(
                     )
                 )
 
-                # 3) Build chunks (prefer page-based for PDFs)
-                use_page_chunking = True if ext == ".pdf" else False
+                # 2b) Merge descriptions back into image dicts for position-aware chunking
+                for page in pages_data:
+                    images = page.get("images", [])
+                    descriptions = page.get("image_descriptions", [])
 
-                if use_page_chunking:
-                    # Extract page texts and correlate with images
-                    page_texts = extract_text_by_page(content, fname, tmp_dir)
-                    page_text_map = {p["page"]: (p.get("text") or "") for p in page_texts}
+                    # Merge descriptions into image dictionaries
+                    for i, img in enumerate(images):
+                        if isinstance(img, dict) and i < len(descriptions):
+                            img["description"] = descriptions[i]
 
-                    chunks = []
-                    for page in pages_data:
-                        pg = page.get("page") or 0
-                        pg_text = page_text_map.get(pg, "")
-                        img_list = []
-                        for img_path, desc in zip(page.get("images", []), page.get("image_descriptions", [])):
-                            img_list.append({
-                                "filename": Path(img_path).name,
-                                "storage_path": img_path,
-                                "description": desc,
-                            })
-                        page_ocr_used = False
-                        # OCR fallback if no text extracted
-                        if enable_ocr and not (pg_text or "").strip() and img_list:
-                            ocr_texts = []
-                            for img in img_list:
-                                try:
-                                    with Image.open(img["storage_path"]) as im:
-                                        ocr_text = pytesseract.image_to_string(im)
-                                        if ocr_text and ocr_text.strip():
-                                            ocr_texts.append(ocr_text.strip())
-                                except Exception as e:
-                                    logger.warning(f"OCR failed for image {img['filename']}: {e}")
-                            if ocr_texts:
-                                pg_text = "\n".join(ocr_texts)
-                                page_ocr_used = True
-                        # Ensure we have some minimal content to embed
-                        if not (pg_text or "").strip():
-                            pg_text = f"Page {pg}: [no extractable text]"
-                        chunks.append({
-                            "content": pg_text.strip(),
-                            "chunk_index": max(0, int(pg) - 1),
-                            "images": img_list,
-                            "page_number": pg,
-                            "section_type": "page",
-                            "section_title": "",
-                            "has_images": len(img_list) > 0,
-                            "ocr_used": page_ocr_used,
-                            "start_position": 0,
-                            "end_position": len(pg_text or ""),
-                        })
-                    logger.info(f"Page-based chunking created {len(chunks)} chunks for {fname}")
-                else:
-                    # full-document processing
-                    doc_data = process_document_with_context_multi_model(
-                        file_content=content,
-                        filename=fname,
-                        temp_dir=tmp_dir,
-                        doc_id=fname,
-                        openai_api_key=openai_api_key,
-                        run_all_models=len(vision_models) > 1,
-                        selected_models=set(vision_models),
-                        vision_flags={m: (m in vision_models) for m in vision_models},
-                    )
+                # 3) Build chunks using position-aware wrapper
+                chunks = create_chunks_with_position_support(
+                    ext=ext,
+                    pages_data=pages_data,
+                    fname=fname,
+                    content=content,
+                    tmp_dir=tmp_dir,
+                    openai_api_key=openai_api_key,
+                    vision_models=vision_models,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                    enable_ocr=enable_ocr,
+                    use_positions=True
+                )
 
-                    # Structure-preserving processing → embed → insert
-                    try:
-                        if use_structure_preserving_upload():
-                            logger.info(f"Using structure-preserving upload for {fname}")
-                            chunks = structure_preserving_process(doc_data["content"],
-                                                                doc_data["images_data"],
-                                                                fname)
-                            logger.info(f"Structure-preserving processing completed: {len(chunks)} chunks")
-                        else:
-                            # Fallback to original chunking
-                            logger.info(f"Using traditional chunking for {fname}")
-                            chunks = smart_chunk_with_context(doc_data["content"],
-                                                          doc_data["images_data"],
-                                                          chunk_size, chunk_overlap)
-                    except Exception as e:
-                        logger.error(f"Error in document processing for {fname}: {e}")
-                        logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
-                        # Fallback to original chunking if structure-preserving fails
-                        logger.info(f"Falling back to traditional chunking for {fname}")
-                        try:
-                            chunks = smart_chunk_with_context(doc_data["content"],
-                                                          doc_data["images_data"],
-                                                          chunk_size, chunk_overlap)
-                            logger.info(f"Traditional chunking successful: {len(chunks)} chunks created")
-                        except Exception as fallback_error:
-                            logger.error(f"CRITICAL: Both processing methods failed for {fname}: {fallback_error}")
-                            raise fallback_error
+                # Validate chunks were created
+                if not chunks:
+                    msg = f"No chunks created for {fname}, skipping document"
+                    logger.error(msg)
+                    redis_client.hset(doc_status_key, mapping={
+                        "status": "failed",
+                        "end_time": datetime.now().isoformat(),
+                        "error_message": msg
+                    })
+                    # Raise to abort processing this document (continue is invalid here)
+                    raise RuntimeError(msg)
 
                 # Update document chunk count
                 redis_client.hset(doc_status_key, "chunks_total", len(chunks))
@@ -1261,13 +1431,38 @@ def run_ingest_job(
                             "timestamp": datetime.now().isoformat(),
                         }
                         
-                        filenames = [img["filename"] for img in c.get("images", [])]
-                        paths     = [img["storage_path"] for img in c.get("images", [])]
-                        descs     = [img.get("description", "") for img in c.get("images", [])]
+                        # Safe extraction of image metadata (handles both string paths and dict objects)
+                        images_list = c.get("images", [])
+                        filenames = []
+                        paths = []
+                        descs = []
+
+                        for img in images_list:
+                            if isinstance(img, dict):
+                                filenames.append(img.get("filename", ""))
+                                paths.append(img.get("storage_path", ""))
+                                descs.append(img.get("description", ""))
+                            elif isinstance(img, str):
+                                # Legacy: img is a path string (Path is imported at top of file)
+                                filenames.append(Path(img).name)
+                                paths.append(img)
+                                descs.append("")
+                            else:
+                                logger.warning(f"Unexpected image type: {type(img)}")
+                                continue
 
                         meta["image_filenames"]     = json.dumps(filenames)
                         meta["image_storage_paths"] = json.dumps(paths)
                         meta["image_descriptions"]  = json.dumps(descs)
+
+                        # Store image positions if available (from position-aware chunking)
+                        if "image_positions" in c:
+                            meta["image_positions"] = json.dumps(c["image_positions"])
+                            logger.debug(f"[{job_id}] Stored {len(c['image_positions'])} image positions for chunk {c.get('chunk_index', 0)}")
+                        else:
+                            # Legacy chunks without position data
+                            meta["image_positions"] = json.dumps([])
+
                         # Derive which vision models were used from description prefixes
                         models_used = set()
                         for d in descs:

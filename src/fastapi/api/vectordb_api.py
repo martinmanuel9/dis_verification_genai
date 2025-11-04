@@ -5,11 +5,16 @@ from typing import List, Dict, Any
 from pathlib import Path
 from services.document_ingestion_service import run_ingest_job
 from services.database import chroma_client
+# Position-aware reconstruction imports
+from services.position_aware_reconstruction import (
+    reconstruct_document_with_positions,
+    insert_images_at_positions
+)
 import redis
 import os
 import uuid
 import logging
-import json 
+import json
 
 logger = logging.getLogger("VECTORDB_API")
 
@@ -32,6 +37,10 @@ VISION_CONFIG = {
     "enhanced_local_enabled": True,
     "huggingface_model": os.getenv("HUGGINGFACE_VISION_MODEL", "Salesforce/blip-image-captioning-base")
 }
+
+# Position-aware reconstruction feature flag
+USE_POSITION_AWARE_RECONSTRUCTION = os.getenv("USE_POSITION_AWARE_RECONSTRUCTION", "true").lower() == "true"
+logger.info(f"Position-aware reconstruction: {'ENABLED' if USE_POSITION_AWARE_RECONSTRUCTION else 'DISABLED'}")
 
 ### ChromaDB Collection Endpoints ###
 @vectordb_api_router.get("/collections")
@@ -450,11 +459,182 @@ async def upload_and_process_documents(
 
 
 
+def hybrid_reconstruct_document(chunks_data: List[Dict], base_image_url: str = "/api/vectordb/images") -> Dict[str, Any]:
+    """
+    Hybrid reconstruction function that supports both position-aware and legacy reconstruction.
+
+    Checks if chunks have image_positions metadata. If so, uses position-aware reconstruction.
+    Otherwise, falls back to legacy reconstruction method.
+
+    Args:
+        chunks_data: List of chunk dictionaries with content and metadata
+        base_image_url: Base URL for image references
+
+    Returns:
+        Dictionary with reconstructed_content, images, metadata, and reconstruction_method
+    """
+    # Validate chunks_data is not empty
+    if not chunks_data:
+        logger.warning("No chunks provided for reconstruction")
+        return {
+            "reconstructed_content": "# No content available",
+            "images": [],
+            "metadata": {
+                "file_type": "unknown",
+                "total_images": 0,
+                "processing_timestamp": "",
+                "openai_api_used": False,
+                "ocr_pages": 0,
+                "vision_models_used": [],
+                "reconstruction_method": "empty"
+            }
+        }
+
+    # Check if any chunk has image_positions metadata (indicates position-aware chunking)
+    has_position_data = False
+    for chunk in chunks_data:
+        md = chunk.get("metadata", {})
+        img_pos = md.get("image_positions", "[]")
+        try:
+            positions = json.loads(img_pos) if isinstance(img_pos, str) else img_pos
+            if positions and len(positions) > 0:
+                has_position_data = True
+                break
+        except:
+            pass
+
+    # Use position-aware reconstruction if enabled and position data is available
+    if USE_POSITION_AWARE_RECONSTRUCTION and has_position_data:
+        logger.info(f"Using position-aware reconstruction (found position data in {len(chunks_data)} chunks)")
+        try:
+            reconstructed_content, images, metadata = reconstruct_document_with_positions(
+                chunks_data=chunks_data,
+                base_image_url=base_image_url
+            )
+
+            # Enrich metadata with fields from chunk metadata (for compatibility)
+            first_chunk_meta = chunks_data[0].get("metadata", {}) if chunks_data else {}
+
+            # Convert sets to lists for JSON serialization
+            if "pages" in metadata and isinstance(metadata["pages"], set):
+                metadata["pages"] = sorted(list(metadata["pages"]))
+            if "vision_models_used" in metadata and isinstance(metadata["vision_models_used"], set):
+                metadata["vision_models_used"] = sorted(list(metadata["vision_models_used"]))
+
+            return {
+                "reconstructed_content": reconstructed_content,
+                "images": images,
+                "metadata": {
+                    **metadata,
+                    "reconstruction_method": "position_aware",
+                    "file_type": first_chunk_meta.get("file_type", "unknown"),
+                    "processing_timestamp": first_chunk_meta.get("timestamp", ""),
+                    "openai_api_used": first_chunk_meta.get("openai_api_used", False)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Position-aware reconstruction failed, falling back to legacy: {e}")
+            # Fall through to legacy reconstruction
+
+    # Legacy reconstruction
+    logger.info(f"Using legacy reconstruction for {len(chunks_data)} chunks")
+
+    document_name = chunks_data[0].get("metadata", {}).get("document_name", "UNKNOWN")
+    lines: list[str] = [f"# Document: {document_name}", ""]
+    all_images = []
+    ocr_pages = 0
+    vision_union = set()
+    image_counter = 1
+    last_section_title = None
+
+    for chunk in chunks_data:
+        md = chunk["metadata"]
+        content = chunk["content"] or ""
+
+        # Heading decisions based on metadata
+        section_title = md.get("section_title") or ""
+        section_type = (md.get("section_type") or "").lower()
+
+        if section_title and section_title != last_section_title:
+            lines.append(f"## {section_title}")
+            last_section_title = section_title
+        elif not section_title and not section_type:
+            # legacy: prepend page info if available
+            legacy_page = md.get("page")
+            if legacy_page:
+                pass  # Do not add page headings per user preference
+
+        # Aggregate per-chunk metadata for summary
+        try:
+            if md.get("ocr_used"):
+                ocr_pages += 1
+            vm_raw = md.get("vision_models_used")
+            if vm_raw:
+                vm_list = json.loads(vm_raw) if isinstance(vm_raw, str) else vm_raw
+                if isinstance(vm_list, list):
+                    for v in vm_list:
+                        if isinstance(v, str):
+                            vision_union.add(v)
+        except Exception:
+            pass
+
+        # Replace image markers with markdown-style descriptions and collect image info
+        if md.get("has_images"):
+            try:
+                image_filenames = json.loads(md.get("image_filenames", "[]"))
+                image_paths = json.loads(md.get("image_storage_paths", "[]"))
+                image_descriptions = json.loads(md.get("image_descriptions", "[]"))
+
+                for filename, path, desc in zip(image_filenames, image_paths, image_descriptions):
+                    markdown_img = (
+                        f"\n\n[Image {image_counter}]:\n"
+                        f"# Description:\n"
+                        f"{(desc or '').strip()}\n"
+                    )
+                    marker = f"[IMAGE:{filename}]"
+                    content = content.replace(marker, markdown_img)
+
+                    all_images.append({
+                        "filename": filename,
+                        "storage_path": path,
+                        "description": desc,
+                        "exists": os.path.exists(path)
+                    })
+                    image_counter += 1
+            except Exception as e:
+                logger.error(f"Failed to insert images: {e}")
+
+        lines.append(content)
+        lines.append("")
+
+    reconstructed_content = "\n".join(lines).strip()
+
+    # Safely extract metadata from first chunk
+    first_chunk_meta = chunks_data[0].get("metadata", {}) if chunks_data else {}
+
+    return {
+        "reconstructed_content": reconstructed_content,
+        "images": all_images,
+        "metadata": {
+            "file_type": first_chunk_meta.get("file_type", "unknown"),
+            "total_images": len(all_images),
+            "processing_timestamp": first_chunk_meta.get("timestamp", ""),
+            "openai_api_used": ("openai" in vision_union) or first_chunk_meta.get("openai_api_used", False),
+            "ocr_pages": int(ocr_pages),
+            "vision_models_used": sorted(list(vision_union)),
+            "reconstruction_method": "legacy"
+        }
+    }
+
+
 @vectordb_api_router.get("/documents/reconstruct/{document_id}")
-def reconstruct_document(document_id: str, collection_name: str = Query(...)):
+def reconstruct_document(document_id: str, collection_name: str = Query(...), request: Request = None):
     """
     Reconstruct original document from stored chunks and images, using chunk metadata
     (section titles, section types, page numbers) to format headings and structure.
+
+    Supports both position-aware reconstruction (images at correct positions) and
+    legacy reconstruction (images appended to chunks).
     """
     try:
         collection = chroma_client.get_collection(name=collection_name)
@@ -471,102 +651,40 @@ def reconstruct_document(document_id: str, collection_name: str = Query(...)):
         # Sort chunks by chunk index
         chunks_data = []
         for i, chunk_id in enumerate(results["ids"]):
-            metadata = results["metadatas"][i]
+            metadata = results["metadatas"][i] or {}  # Handle None metadata from ChromaDB
             chunks_data.append({
                 "chunk_index": metadata.get("chunk_index", 0),
-                "content": results["documents"][i],
+                "content": results["documents"][i] or "",
                 "metadata": metadata
             })
 
         chunks_data.sort(key=lambda x: x["chunk_index"])
 
-        document_name = chunks_data[0]["metadata"].get("document_name", "UNKNOWN")
-        lines: list[str] = [f"# Document: {document_name}", ""]
-        all_images = []
-        ocr_pages = 0
-        vision_union = set()
-        image_counter = 1
-        last_section_title = None
-        last_page_number = None
+        # Build absolute image URL for browser rendering
+        # IMPORTANT: Always use localhost for browser access, not Docker internal hostname
+        # The request.url.netloc might be "fastapi:9020" (Docker internal) which browsers can't access
+        base_url = "http://localhost:9020"
+        base_image_url = f"{base_url}/api/vectordb/images"
+        logger.info(f"Using base_image_url: {base_image_url}")
 
-        for chunk in chunks_data:
-            md = chunk["metadata"]
-            content = chunk["content"] or ""
+        # Use hybrid reconstruction (supports both position-aware and legacy)
+        result = hybrid_reconstruct_document(
+            chunks_data=chunks_data,
+            base_image_url=base_image_url
+        )
 
-            # Heading decisions based on metadata
-            section_title = md.get("section_title") or ""
-            section_type = (md.get("section_type") or "").lower()
-            page_number = md.get("page_number")
-
-            if section_title and section_title != last_section_title:
-                lines.append(f"## {section_title}")
-                last_section_title = section_title
-            elif not section_title and not section_type:
-                # legacy: prepend page info if available
-                legacy_page = md.get("page")
-                if legacy_page:
-                    pass  # Do not add page headings per user preference
-
-            # Aggregate per-chunk metadata for summary
-            try:
-                if md.get("ocr_used"):
-                    ocr_pages += 1
-                vm_raw = md.get("vision_models_used")
-                if vm_raw:
-                    vm_list = json.loads(vm_raw) if isinstance(vm_raw, str) else vm_raw
-                    if isinstance(vm_list, list):
-                        for v in vm_list:
-                            if isinstance(v, str):
-                                vision_union.add(v)
-            except Exception:
-                pass
-
-            # Replace image markers with markdown-style descriptions and collect image info
-            if md.get("has_images"):
-                try:
-                    image_filenames = json.loads(md.get("image_filenames", "[]"))
-                    image_paths = json.loads(md.get("image_storage_paths", "[]"))
-                    image_descriptions = json.loads(md.get("image_descriptions", "[]"))
-
-                    for filename, path, desc in zip(image_filenames, image_paths, image_descriptions):
-                        markdown_img = (
-                            f"\n\n[Image {image_counter}]:\n"
-                            f"# Description:\n"
-                            f"{(desc or '').strip()}\n"
-                        )
-                        marker = f"[IMAGE:{filename}]"
-                        content = content.replace(marker, markdown_img)
-
-                        all_images.append({
-                            "filename": filename,
-                            "storage_path": path,
-                            "description": desc,
-                            "exists": os.path.exists(path)
-                        })
-                        image_counter += 1
-
-                except Exception as e:
-                    logger.error(f"Failed to insert images: {e}")
-
-            lines.append(content)
-            lines.append("")
-
-        reconstructed_content = "\n".join(lines).strip()
+        # Safe access to document name
+        doc_name = "Unknown"
+        if chunks_data and chunks_data[0].get("metadata"):
+            doc_name = chunks_data[0]["metadata"].get("document_name", "Unknown")
 
         return {
             "document_id": document_id,
-            "document_name": chunks_data[0]["metadata"].get("document_name", "Unknown"),
+            "document_name": doc_name,
             "total_chunks": len(chunks_data),
-            "reconstructed_content": reconstructed_content,
-            "images": all_images,
-            "metadata": {
-                "file_type": chunks_data[0]["metadata"].get("file_type"),
-                "total_images": len(all_images),
-                "processing_timestamp": chunks_data[0]["metadata"].get("timestamp"),
-                "openai_api_used": ("openai" in vision_union) or chunks_data[0]["metadata"].get("openai_api_used", False),
-                "ocr_pages": int(ocr_pages),
-                "vision_models_used": sorted(list(vision_union)),
-            }
+            "reconstructed_content": result["reconstructed_content"],
+            "images": result["images"],
+            "metadata": result["metadata"]
         }
 
     except HTTPException:

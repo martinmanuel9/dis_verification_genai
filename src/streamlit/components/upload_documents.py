@@ -83,6 +83,12 @@ def query_documents(key_prefix: str = "",):
                                 
 def view_images(key_prefix: str = "",):
     def pref(k): return f"{key_prefix}_{k}" if key_prefix else k
+
+    # Initialize session state for reconstruction result
+    result_key = pref("reconstructed_result")
+    if result_key not in st.session_state:
+        st.session_state[result_key] = None
+
     if st.session_state.collections:
         reconstruct_collection = st.selectbox("Select Collection", st.session_state.collections, key=pref("reconstruct_collection"))
 
@@ -116,57 +122,92 @@ def view_images(key_prefix: str = "",):
                         collection_name=reconstruct_collection
                     )
 
+                # Store result in session state
+                st.session_state[result_key] = result
                 st.success(f"Document reconstructed: {result['document_name']}")
-
-                # Show document info
-                with st.expander("Document Information"):
-                    st.write(f"**Document ID**: {result['document_id']}")
-                    st.write(f"**Document Name**: {result['document_name']}")
-                    st.write(f"**Total Chunks**: {result['total_chunks']}")
-                    st.write(f"**File Type**: {result['metadata']['file_type']}")
-                    st.write(f"**Total Images**: {result['metadata']['total_images']}")
-                    if 'ocr_pages' in result.get('metadata', {}):
-                        st.write(f"**Pages with OCR**: {result['metadata']['ocr_pages']}")
-                    vm_used = result.get('metadata', {}).get('vision_models_used') or []
-                    if vm_used:
-                        st.write(f"**Vision Models Used**: {', '.join(vm_used)}")
-
-                # Build rich markdown with embedded images
-                render_reconstructed_document(result)
-
-                # ---- EXPORT DOCUMENTS ----
-                with st.expander("Export Document"):
-                    # Use centralized FastAPI word_export_service for Word export
-                    if st.button("Export to Word", key=pref("export_reconstructed_word")):
-                        try:
-                            with st.spinner("Generating Word document…"):
-                                export_resp = requests.post(
-                                    f"{config.endpoints.doc_gen}/export-reconstructed-word",
-                                    json=result,
-                                    timeout=60
-                                )
-                                export_resp.raise_for_status()
-                            payload = export_resp.json()
-                            b64 = payload.get("content_b64")
-                            filename = payload.get("filename", f"{result['document_name']}.docx")
-                            if b64:
-                                import base64
-                                blob = base64.b64decode(b64)
-                                st.download_button(
-                                    label=f"Download {filename}",
-                                    data=blob,
-                                    file_name=filename,
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    key=pref("download_reconstructed_word")
-                                )
-                                st.success("Word document ready!")
-                            else:
-                                st.error("No file returned from export service.")
-                        except Exception as e:
-                            st.error(f"Error exporting Word: {e}")
 
             except Exception as e:
                 st.error(f"Error reconstructing document: {str(e)}")
+
+        # Display reconstruction result if it exists (outside button conditional)
+        if st.session_state[result_key]:
+            result = st.session_state[result_key]
+
+            # Show document info
+            with st.expander("Document Information"):
+                st.write(f"**Document ID**: {result['document_id']}")
+                st.write(f"**Document Name**: {result['document_name']}")
+                st.write(f"**Total Chunks**: {result['total_chunks']}")
+                st.write(f"**File Type**: {result['metadata']['file_type']}")
+                st.write(f"**Total Images**: {result['metadata']['total_images']}")
+                if 'ocr_pages' in result.get('metadata', {}):
+                    st.write(f"**Pages with OCR**: {result['metadata']['ocr_pages']}")
+                vm_used = result.get('metadata', {}).get('vision_models_used') or []
+                if vm_used:
+                    st.write(f"**Vision Models Used**: {', '.join(vm_used)}")
+
+            # Build rich markdown with embedded images
+            render_reconstructed_document(result)
+
+            # ---- EXPORT DOCUMENTS (SEPARATE SECTION) ----
+            st.markdown("---")  # Visual separator
+            st.subheader("Export Document")
+
+            # Initialize session state for export cache
+            export_state_key = pref("export_word_data")
+            if export_state_key not in st.session_state:
+                st.session_state[export_state_key] = None
+
+            # Generate Word document on-demand when download button is clicked
+            # Check if we need to regenerate (if document changed)
+            needs_generation = (
+                st.session_state[export_state_key] is None or
+                st.session_state[export_state_key].get("document_id") != result["document_id"]
+            )
+
+            if needs_generation:
+                # Auto-generate on first display or when document changes
+                try:
+                    with st.spinner("Generating Word document..."):
+                        export_resp = requests.post(
+                            f"{config.endpoints.doc_gen}/export-reconstructed-word",
+                            json=result,
+                            timeout=60
+                        )
+                        export_resp.raise_for_status()
+                    payload = export_resp.json()
+                    b64 = payload.get("content_b64")
+                    filename = payload.get("filename", f"{result['document_name']}.docx")
+
+                    if b64:
+                        import base64
+                        blob = base64.b64decode(b64)
+                        # Store in session state with document ID to track changes
+                        st.session_state[export_state_key] = {
+                            "data": blob,
+                            "filename": filename,
+                            "document_id": result["document_id"]
+                        }
+                        st.success("Word document generated!")
+                    else:
+                        st.error("No file returned from export service.")
+                        st.session_state[export_state_key] = None
+                except Exception as e:
+                    st.error(f"Error generating Word document: {e}")
+                    st.session_state[export_state_key] = None
+
+            # Show download button if export data exists
+            if st.session_state[export_state_key]:
+                export_data = st.session_state[export_state_key]
+                st.download_button(
+                    label=f"Download {export_data['filename']}",
+                    data=export_data["data"],
+                    file_name=export_data["filename"],
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key=pref("download_reconstructed_word"),
+                    use_container_width=False,
+                    type="primary"
+                )
 
 def render_upload_component(
     available_collections: list[str],

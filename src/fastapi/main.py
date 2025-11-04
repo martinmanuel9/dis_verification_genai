@@ -12,7 +12,6 @@ from api.document_generation_api import doc_gen_api_router
 from api.analytics_api import analytics_api_router
 from api.chromadb_api import chromadb_api_router
 from api.redis_api import redis_api_router
-from api.legal_assist_api import legal_assist_api_router
 from api.vectordb_api import vectordb_api_router
 from api.models_api import models_api_router
 
@@ -30,7 +29,6 @@ app.include_router(doc_gen_api_router, prefix="/api")
 app.include_router(analytics_api_router, prefix="/api")
 app.include_router(chromadb_api_router, prefix="/api")
 app.include_router(redis_api_router, prefix="/api")
-app.include_router(legal_assist_api_router, prefix="/api")
 app.include_router(vectordb_api_router, prefix="/api")
 app.include_router(models_api_router, prefix="/api")
 

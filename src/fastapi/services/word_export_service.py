@@ -345,8 +345,18 @@ class WordExportService:
             raise e
     
     def export_reconstructed_document_to_word(self, reconstructed: Dict[str, Any]) -> bytes:
-        """Export a reconstructed document (text + optional images) to a Word document."""
+        """
+        Export a reconstructed document (text + optional images) to a Word document.
+
+        Supports position-aware image placement by parsing markdown image syntax ![alt](url)
+        and inserting images inline at their correct positions.
+        """
         try:
+            import re
+            import tempfile
+            import requests
+            from docx.shared import Inches
+
             doc = Document()
             self._setup_document_styles(doc)
 
@@ -354,58 +364,134 @@ class WordExportService:
             title = doc.add_heading(title_text, 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Render reconstructed content with simple markdown-like handling
+            # Get reconstructed content with position-aware images
             content = reconstructed.get('reconstructed_content', '') or ''
+
+            # Debug: Log content stats
+            total_lines = len(content.splitlines())
+            logger.info(f"Reconstructed content: {len(content)} chars, {total_lines} lines")
+
+            # Debug: Count how many image markers exist
+            import re as re_module
+            image_count = len(re_module.findall(r'!\[', content))
+            logger.info(f"Found {image_count} image markers (![) in reconstructed content")
+
+            # Use correct image storage path (FastAPI service, not ChromaDB)
+            IMAGES_DIR = os.path.join(os.getcwd(), "stored_images")
+
+            # Parse markdown handling inline images
+            # Pattern for markdown images: ![alt text](url)
+            # IMPORTANT: Use re.DOTALL to match across newlines (in case image markdown spans lines)
+            image_pattern = r'!\[([^\]]*)\]\(([^\)]+)\)'
+
+            images_inserted = 0
+            images_failed = 0
+
+            # First, find and process all images in the content
+            # Replace each image with a unique placeholder to preserve position
+            image_data = []
+            for match in re.finditer(image_pattern, content, re.DOTALL):
+                alt_text = match.group(1)
+                image_url = match.group(2)
+                placeholder = f"<<<IMAGE_{len(image_data)}>>>"
+                image_data.append({
+                    "alt_text": alt_text.strip(),
+                    "image_url": image_url.strip(),
+                    "placeholder": placeholder
+                })
+                logger.info(f"Found image {len(image_data)}: {alt_text[:50]}...")
+
+            # Replace images with placeholders
+            for img in image_data:
+                # Build the original pattern to replace
+                original = f"![{img['alt_text']}]({img['image_url']})"
+                content = content.replace(original, img['placeholder'])
+
+            # Now process line by line with placeholders
             for line in content.splitlines():
                 l = (line or '').strip()
                 if not l:
                     doc.add_paragraph("")
                     continue
-                if l.startswith('### '):
+
+                # Check if line contains an image placeholder
+                image_match = None
+                for idx, img in enumerate(image_data):
+                    if img['placeholder'] in l:
+                        image_match = (idx, img)
+                        break
+
+                if image_match:
+                    idx, img = image_match
+                    alt_text = img['alt_text']
+                    image_url = img['image_url']
+                    placeholder = img['placeholder']
+
+                    # Extract filename from URL
+                    filename = image_url.split('/')[-1] if '/' in image_url else image_url
+
+                    # Find placeholder position in line
+                    placeholder_pos = l.index(placeholder)
+
+                    # Add text before image placeholder (if any)
+                    text_before = l[:placeholder_pos].strip()
+                    if text_before:
+                        doc.add_paragraph(text_before)
+
+                    # Try to add the image
+                    try:
+                        image_path = os.path.join(IMAGES_DIR, filename)
+                        logger.info(f"✅ Inserting image {idx+1}/{len(image_data)}: {filename}")
+
+                        if os.path.exists(image_path):
+                            doc.add_picture(image_path, width=Inches(5.5))
+                            images_inserted += 1
+                            # Add caption if present
+                            if alt_text:
+                                para = doc.add_paragraph(alt_text)
+                                para.style = 'Intense Quote'
+                        else:
+                            logger.warning(f"❌ Image not found at path: {image_path}")
+                            doc.add_paragraph(f"[Image: {alt_text or filename}]")
+                            images_failed += 1
+                    except Exception as e:
+                        logger.error(f"❌ Failed to insert image {filename}: {e}")
+                        doc.add_paragraph(f"[Image: {alt_text or filename}]")
+                        images_failed += 1
+
+                    # Add text after image placeholder (if any)
+                    text_after = l[placeholder_pos + len(placeholder):].strip()
+                    if text_after:
+                        doc.add_paragraph(text_after)
+
+                # Handle regular markdown formatting
+                elif l.startswith('### '):
                     doc.add_heading(l[4:].strip(), level=3)
                 elif l.startswith('## '):
                     doc.add_heading(l[3:].strip(), level=2)
                 elif l.startswith('# '):
                     doc.add_heading(l[2:].strip(), level=1)
-                elif l.startswith(('-', '*', '•')):
+                elif l.startswith(('-', '*', '•')) and not l.startswith('*'):
                     doc.add_paragraph(l.lstrip('-*• ').strip(), style='List Bullet')
+                elif l.startswith('*') and l.endswith('*') and not l.startswith('**') and len(l) > 2:
+                    # Italic caption line (from markdown)
+                    # Don't add if it's just after an image (avoid duplicate captions)
+                    pass  # Skip these as they're handled in alt_text
                 else:
-                    doc.add_paragraph(l)
+                    # Regular paragraph - handle bold formatting
+                    if '**' in l and l.count('**') >= 2:
+                        # Has bold text
+                        para = doc.add_paragraph()
+                        parts = l.split('**')
+                        for i, part in enumerate(parts):
+                            if part:
+                                run = para.add_run(part)
+                                if i % 2 == 1:  # Odd indices are bold
+                                    run.bold = True
+                    else:
+                        doc.add_paragraph(l)
 
-            # Optional: embed images
-            images = reconstructed.get('images') or []
-            if images:
-                doc.add_page_break()
-                doc.add_heading('Images', level=1)
-                CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8000")
-                import tempfile
-                from docx.shared import Inches
-                for idx, img in enumerate(images, 1):
-                    filename = img.get('filename')
-                    desc = img.get('description') or ''
-                    try:
-                        import requests
-                        resp = requests.get(f"{CHROMA_URL}/images/{filename}", timeout=15)
-                        if resp.ok:
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
-                                tf.write(resp.content)
-                                temp_path = tf.name
-                            doc.add_picture(temp_path, width=Inches(5.5))
-                            if desc:
-                                para = doc.add_paragraph(desc)
-                                para.style = 'Quote'
-                            os.unlink(temp_path)
-                        else:
-                            doc.add_paragraph(f"[Image '{filename}' not available]")
-                            if desc:
-                                para = doc.add_paragraph(desc)
-                                para.style = 'Quote'
-                    except Exception as e:
-                        doc.add_paragraph(f"[Failed to load image '{filename}': {e}]")
-                        if desc:
-                            para = doc.add_paragraph(desc)
-                            para.style = 'Quote'
-
+            logger.info(f"Word export complete: {images_inserted} images inserted, {images_failed} failed")
             return self._document_to_bytes(doc)
         except Exception as e:
             logger.error(f"Failed to export reconstructed document to Word: {str(e)}")
@@ -458,20 +544,78 @@ class WordExportService:
             raise e
     
     def _setup_document_styles(self, doc: Document):
-        """Set up custom styles for the document."""
+        """Set up custom styles for professional-looking document."""
         try:
-            # Create custom styles
+            # Set document-wide font defaults
             styles = doc.styles
-            
-            # Quote style
-            if 'Quote' not in [style.name for style in styles]:
+
+            # Configure Normal style (base for all paragraphs)
+            normal_style = styles['Normal']
+            normal_font = normal_style.font
+            normal_font.name = 'Calibri'
+            normal_font.size = Pt(11)
+            normal_style.paragraph_format.space_after = Pt(10)
+            normal_style.paragraph_format.line_spacing = 1.15
+
+            # Configure heading styles
+            for level in range(1, 4):
+                heading_style = styles[f'Heading {level}']
+                heading_font = heading_style.font
+                heading_font.name = 'Calibri'
+                heading_font.bold = True
+                heading_font.color.rgb = None  # Keep default blue
+
+                if level == 1:
+                    heading_font.size = Pt(16)
+                    heading_style.paragraph_format.space_before = Pt(18)
+                    heading_style.paragraph_format.space_after = Pt(12)
+                elif level == 2:
+                    heading_font.size = Pt(14)
+                    heading_style.paragraph_format.space_before = Pt(12)
+                    heading_style.paragraph_format.space_after = Pt(6)
+                elif level == 3:
+                    heading_font.size = Pt(12)
+                    heading_style.paragraph_format.space_before = Pt(10)
+                    heading_style.paragraph_format.space_after = Pt(6)
+
+            # Quote/Caption style for image captions
+            if 'Quote' not in [s.name for s in styles]:
                 quote_style = styles.add_style('Quote', WD_STYLE_TYPE.PARAGRAPH)
-                quote_font = quote_style.font
-                quote_font.italic = True
-                quote_font.size = Pt(10)
-                quote_style.paragraph_format.left_indent = Inches(0.5)
-                quote_style.paragraph_format.right_indent = Inches(0.5)
-        except:
+            else:
+                quote_style = styles['Quote']
+
+            quote_font = quote_style.font
+            quote_font.name = 'Calibri'
+            quote_font.italic = True
+            quote_font.size = Pt(10)
+            quote_font.color.theme_color = 8  # Gray
+            quote_style.paragraph_format.left_indent = Inches(0.25)
+            quote_style.paragraph_format.space_after = Pt(12)
+
+            # Intense Quote for image captions (darker, centered)
+            if 'Intense Quote' not in [s.name for s in styles]:
+                intense_quote_style = styles.add_style('Intense Quote', WD_STYLE_TYPE.PARAGRAPH)
+            else:
+                intense_quote_style = styles['Intense Quote']
+
+            intense_quote_font = intense_quote_style.font
+            intense_quote_font.name = 'Calibri'
+            intense_quote_font.italic = True
+            intense_quote_font.size = Pt(10)
+            intense_quote_font.color.theme_color = 8
+            intense_quote_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            intense_quote_style.paragraph_format.space_after = Pt(12)
+
+            # Set document margins
+            sections = doc.sections
+            for section in sections:
+                section.top_margin = Inches(1)
+                section.bottom_margin = Inches(1)
+                section.left_margin = Inches(1)
+                section.right_margin = Inches(1)
+
+        except Exception as e:
+            logger.warning(f"Failed to set up document styles: {e}")
             pass  # Ignore styling errors
     
     def _setup_document_styles_optimized(self, doc: Document):

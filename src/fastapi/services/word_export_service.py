@@ -374,6 +374,9 @@ class WordExportService:
             # Pattern for markdown images: ![alt text](url)
             image_pattern = r'!\[([^\]]*)\]\(([^\)]+)\)'
 
+            images_inserted = 0
+            images_failed = 0
+
             for line in content.splitlines():
                 l = (line or '').strip()
                 if not l:
@@ -383,6 +386,7 @@ class WordExportService:
                 # Check if line contains an image
                 image_match = re.search(image_pattern, l)
                 if image_match:
+                    logger.info(f"Found image in markdown: {line[:100]}")
                     # Handle line with inline image
                     alt_text = image_match.group(1)
                     image_url = image_match.group(2)
@@ -398,18 +402,24 @@ class WordExportService:
                     # Try to add the image
                     try:
                         image_path = os.path.join(IMAGES_DIR, filename)
+                        logger.info(f"Looking for image at: {image_path}")
+
                         if os.path.exists(image_path):
+                            logger.info(f"✅ Image found, inserting: {filename}")
                             doc.add_picture(image_path, width=Inches(5.5))
+                            images_inserted += 1
                             # Add caption if present
                             if alt_text:
                                 para = doc.add_paragraph(alt_text)
                                 para.style = 'Intense Quote'
                         else:
-                            logger.warning(f"Image not found: {filename}")
+                            logger.warning(f"❌ Image not found at path: {image_path}")
                             doc.add_paragraph(f"[Image: {alt_text or filename}]")
+                            images_failed += 1
                     except Exception as e:
-                        logger.error(f"Failed to insert image {filename}: {e}")
+                        logger.error(f"❌ Failed to insert image {filename}: {e}")
                         doc.add_paragraph(f"[Image: {alt_text or filename}]")
+                        images_failed += 1
 
                     # Add text after image
                     text_after = l[image_match.end():].strip()
@@ -435,6 +445,7 @@ class WordExportService:
                 else:
                     doc.add_paragraph(l)
 
+            logger.info(f"Word export complete: {images_inserted} images inserted, {images_failed} failed")
             return self._document_to_bytes(doc)
         except Exception as e:
             logger.error(f"Failed to export reconstructed document to Word: {str(e)}")

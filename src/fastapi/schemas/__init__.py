@@ -6,7 +6,6 @@ organized by domain:
 - agent: Agent creation, updates, and responses
 - compliance: Compliance checking schemas
 - rag: RAG (Retrieval-Augmented Generation) schemas
-- session: Session tracking schemas
 - chat: Chat history schemas
 - common: Shared/common schemas (pagination, errors, base responses)
 
@@ -70,17 +69,6 @@ from schemas.rag import (
     RAGMetricsExportRequest,
 )
 
-# Session schemas
-from schemas.session import (
-    SessionHistoryRequest,
-    SessionSummary,
-    SessionHistoryResponse,
-    AgentResponseDetail,
-    SessionDetailsResponse,
-    CreateSessionRequest,
-    CreateSessionResponse,
-)
-
 # Chat schemas
 from schemas.chat import (
     ChatMessage,
@@ -133,15 +121,6 @@ __all__ = [
     "RAGBenchmarkRequest",
     "CollectionPerformanceRequest",
     "RAGMetricsExportRequest",
-
-    # Session
-    "SessionHistoryRequest",
-    "SessionSummary",
-    "SessionHistoryResponse",
-    "AgentResponseDetail",
-    "SessionDetailsResponse",
-    "CreateSessionRequest",
-    "CreateSessionResponse",
 
     # Chat
     "ChatMessage",

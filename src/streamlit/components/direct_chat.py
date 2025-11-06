@@ -6,6 +6,7 @@ from services.chromadb_service import chromadb_service
 from services.chat_service import chat_service
 from components.upload_documents import render_upload_component, browse_documents
 from components.history import Chat_History
+from typing import List, Dict, Any
 
 CHROMADB_API = config.endpoints.vectordb
 
@@ -13,13 +14,33 @@ CHROMADB_API = config.endpoints.vectordb
 def fetch_collections():
     return chromadb_service.get_collections()
 
+def display_citations(formatted_citations: str = ""):
+    """
+    Display formatted citations from the RAG service.
+
+    The formatted_citations already contain all relevant information including:
+    - Source document names and page numbers
+    - Relevance quality tiers and distance scores
+    - Contextual excerpts from the documents
+    - Document position information
+
+    Args:
+        formatted_citations: Pre-formatted citation text from RAG service
+    """
+    if not formatted_citations:
+        return
+
+    st.divider()
+    with st.expander("Sources and Citations", expanded=True):
+        st.markdown(formatted_citations)
+
 def Direct_Chat():
     if "collections" not in st.session_state:
         st.session_state.collections = fetch_collections()
 
     collections = st.session_state.collections
-    chat_tab, eval_tab, doc_upload_tab = st.tabs([
-        "Chat Interface", "Evaluate Document", "Upload Documents"
+    chat_tab, doc_upload_tab = st.tabs([
+        "Chat with AI", "Upload Documents"
     ])
 
     with chat_tab:
@@ -31,11 +52,51 @@ def Direct_Chat():
 
         use_rag = st.checkbox("Use RAG (Retrieval Augmented Generation)", key="chat_use_rag")
         collection_name = None
+        document_id = None
+
         if use_rag:
             if collections:
                 collection_name = st.selectbox(
                     "Document Collection:", collections, key="chat_coll"
                 )
+
+                # Option to filter by specific document
+                filter_by_doc = st.checkbox(
+                    "Filter by specific document?",
+                    key="filter_by_document",
+                    help="Enable this to search within a specific document instead of the entire collection"
+                )
+
+                if filter_by_doc:
+                    # Show document browser
+                    browse_documents(key_prefix="chat_doc_browse")
+
+                    # Document selector
+                    if "documents" in st.session_state and st.session_state.documents:
+                        doc_options = {}
+                        for doc in st.session_state.documents:
+                            if hasattr(doc, 'document_name'):
+                                doc_name = doc.document_name
+                                doc_id_val = doc.document_id
+                            else:
+                                doc_name = doc.get('document_name', 'Unknown')
+                                doc_id_val = doc.get('id', doc.get('document_id', ''))
+                            if doc_id_val:
+                                display_name = f"{doc_name} (ID: {doc_id_val[:8]}...)"
+                                doc_options[display_name] = doc_id_val
+
+                        if doc_options:
+                            selected_display = st.selectbox(
+                                "Select Document:",
+                                options=list(doc_options.keys()),
+                                key="chat_document_selector"
+                            )
+                            document_id = doc_options[selected_display]
+                            st.info(f"🔍 Will search within: {selected_display}")
+                        else:
+                            st.warning("No documents found in this collection.")
+                    else:
+                        st.info("Load documents using the button above to see available documents.")
             else:
                 st.warning("No collections available. Upload docs first.")
 
@@ -52,121 +113,47 @@ def Direct_Chat():
             else:
                 with st.spinner(f"{mode} is analyzing..."):
                     try:
-                        response = chat_service.send_message(
-                            query=user_input,
-                            model=model_key_map[mode],
-                            use_rag=use_rag,
-                            collection_name=collection_name
-                        )
-                        st.success("Analysis Complete:")
-                        st.markdown(response.response)
-                        if response.response_time_ms:
-                            st.caption(f"Response time: {response.response_time_ms/1000:.2f}s")
+                        # If document_id is set, use document evaluation endpoint
+                        # Otherwise use regular chat endpoint
+                        if document_id:
+                            # Document-specific evaluation
+                            data = chat_service.evaluate_document(
+                                document_id=document_id,
+                                collection_name=collection_name,
+                                prompt=user_input,
+                                model_name=model_key_map[mode],
+                                top_k=5
+                            )
+                            answer = data["response"]
+                            rt_ms = data.get("response_time_ms", 0)
+                            session_id = data["session_id"]
+                            formatted_citations = data.get("formatted_citations", "")
+
+                            st.success("Analysis Complete (Document-Specific):")
+                            st.markdown(answer)
+                            st.caption(f"Response time: {rt_ms/1000:.2f}s")
+                            st.caption(f"Session ID: {session_id}")
+                            display_citations(formatted_citations)
+                        else:
+                            # Regular chat (with optional RAG across entire collection)
+                            response = chat_service.send_message(
+                                query=user_input,
+                                model=model_key_map[mode],
+                                use_rag=use_rag,
+                                collection_name=collection_name
+                            )
+                            st.success("Analysis Complete:")
+                            st.markdown(response.response)
+                            if response.response_time_ms:
+                                st.caption(f"Response time: {response.response_time_ms/1000:.2f}s")
+                            if hasattr(response, 'session_id') and response.session_id:
+                                st.caption(f"Session ID: {response.session_id}")
+
+                            # Display citations if available (RAG mode)
+                            formatted_citations = getattr(response, 'formatted_citations', '') or ''
+                            display_citations(formatted_citations)
                     except Exception as e:
                         st.error(f"Request failed: {e}")
-
-        Chat_History(key_prefix="chat_history")
-
-    with eval_tab:
-        st.header("Evaluate Document")
-        use_rag_eval = st.checkbox(
-            "Use RAG mode", value=True, key="eval_use_rag"
-        )
-        collections = st.session_state.collections
-        if use_rag_eval:
-            browse_documents(key_prefix="select_eval_browse")
-            
-            with st.container(border=True, key="eval_params_container"):
-                st.subheader("Evaluation Parameters")
-                
-                coll_name = st.selectbox(
-                    "Select Collection:", collections, key="eval_collection"
-                )
-
-                doc_id = ""
-                if "documents" in st.session_state and st.session_state.documents:
-                    doc_options = {}
-                    for doc in st.session_state.documents:
-                        if hasattr(doc, 'document_name'):
-                            doc_name = doc.document_name
-                            doc_id_val = doc.document_id
-                        else:
-                            doc_name = doc.get('document_name', 'Unknown')
-                            doc_id_val = doc.get('id', doc.get('document_id', ''))
-                        if doc_id_val:
-                            display_name = f"{doc_name} (ID: {doc_id_val[:8]}...)"
-                            doc_options[display_name] = doc_id_val
-                    
-                    if doc_options:
-                        selected_display = st.selectbox(
-                            "Select Document:",
-                            options=list(doc_options.keys()),
-                            key="eval_document_selector"
-                        )
-                        doc_id = doc_options[selected_display]
-                        st.info(f"Selected Document ID: {doc_id}")
-                    else:
-                        st.warning("No documents found. Please load documents first.")
-                else:
-                    st.info("Please load documents first.")
-
-                manual_doc_id = st.text_input(
-                    "Or enter Document ID manually:",
-                    placeholder="e.g. 12345abcde",
-                    key="manual_doc_id"
-                )
-
-                if manual_doc_id:
-                    doc_id = manual_doc_id
-                
-                custom_prompt = st.text_area(
-                    "Custom Prompt:", height=150, key="eval_prompt"
-                )
-                mode2 = st.selectbox(
-                    "Select AI Model:", list(model_key_map.keys()), key="eval_model"
-                )
-
-                if st.button("Evaluate", type="primary", key="eval_button"):
-                    if not custom_prompt:
-                        st.warning("Please enter a prompt.")
-                    elif use_rag_eval and (not coll_name or not doc_id):
-                        st.error("Select both collection and document for RAG mode.")
-                    else:
-                        with st.spinner("Evaluating document..."):
-                            try:
-                                if use_rag_eval:
-                                    data = chat_service.evaluate_document(
-                                        document_id=doc_id,
-                                        collection_name=coll_name,
-                                        prompt=custom_prompt,
-                                        model_name=model_key_map[mode2],
-                                        top_k=5
-                                    )
-                                    answer = data["response"]
-                                    rt_ms = data.get("response_time_ms", 0)
-                                    session_id = data["session_id"]
-                                else:
-                                    response = chat_service.send_message(
-                                        query=custom_prompt,
-                                        model=model_key_map[mode2],
-                                        use_rag=False,
-                                        collection_name=None
-                                    )
-                                    answer = response.response
-                                    rt_ms = response.response_time_ms or 0
-                                    session_id = response.session_id
-
-                                st.success("Evaluation Complete:")
-                                st.markdown(answer)
-                                st.caption(f"Response time: {rt_ms/1000:.2f}s")
-                                st.caption(f"Session ID: {session_id}")
-                            except Exception as e:
-                                st.error(f"Request failed: {e}")
-
-            Chat_History(key_prefix="eval_chat_history")
-
-        else:
-            st.info("RAG disabled: evaluation will be pure LLM.")
 
     with doc_upload_tab:
         st.header("Upload Documents for RAG")

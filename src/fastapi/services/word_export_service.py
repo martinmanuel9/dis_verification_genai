@@ -17,6 +17,8 @@ from docx.oxml.shared import OxmlElement, qn
 from sqlalchemy.orm import Session
 from services.database import ComplianceAgent, ChatHistory, AgentResponse, DebateSession
 import logging
+import tempfile
+import subprocess
 
 logger = logging.getLogger("WORD_EXPORT_SERVICE")
 
@@ -377,7 +379,7 @@ class WordExportService:
             logger.info(f"Found {image_count} image markers (![) in reconstructed content")
 
             # Use correct image storage path (FastAPI service, not ChromaDB)
-            IMAGES_DIR = os.path.join(os.getcwd(), "stored_images")
+            IMAGES_DIR = os.getenv("IMAGES_STORAGE_DIR", os.path.join(os.getcwd(), "stored_images"))
 
             # Parse markdown handling inline images
             # Pattern for markdown images: ![alt text](url)
@@ -495,6 +497,130 @@ class WordExportService:
             return self._document_to_bytes(doc)
         except Exception as e:
             logger.error(f"Failed to export reconstructed document to Word: {str(e)}")
+            raise e
+
+    def export_legal_research_to_word(self, research_data: Dict[str, Any]) -> bytes:
+        """
+        Export legal research results to a Word document.
+
+        Args:
+            research_data: Dictionary containing legal research results
+
+        Returns:
+            bytes: Word document content
+        """
+        try:
+            doc = Document()
+            self._setup_document_styles(doc)
+
+            # Title
+            title = doc.add_heading('Legal Research Report', 0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Metadata
+            doc.add_paragraph(f"Export Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            doc.add_paragraph("")
+
+            # Query
+            if research_data.get('query'):
+                doc.add_heading('Research Query', level=1)
+                query_para = doc.add_paragraph(research_data['query'])
+                query_para.style = 'Quote'
+                doc.add_paragraph("")
+
+            # Metrics
+            doc.add_heading('Research Summary', level=1)
+            table = doc.add_table(rows=4, cols=2)
+            table.style = 'Table Grid'
+
+            table.cell(0, 0).text = 'Internal Citations'
+            table.cell(0, 1).text = str(len(research_data.get('internal_citations', [])))
+            table.cell(1, 0).text = 'External Citations'
+            table.cell(1, 1).text = str(len(research_data.get('external_citations', [])))
+            table.cell(2, 0).text = 'Collections Searched'
+            table.cell(2, 1).text = str(len(research_data.get('collections_searched', [])))
+            table.cell(3, 0).text = 'Response Time'
+            table.cell(3, 1).text = f"{research_data.get('response_time_ms', 0)}ms"
+
+            doc.add_paragraph("")
+
+            # Main response
+            if research_data.get('response'):
+                doc.add_heading('Research Response', level=1)
+                response_para = doc.add_paragraph(research_data['response'])
+                doc.add_paragraph("")
+
+            # Agent analyses
+            if research_data.get('agent_analyses'):
+                doc.add_heading('Agent Analyses', level=1)
+                for idx, analysis in enumerate(research_data['agent_analyses'], 1):
+                    doc.add_heading(f"{analysis.get('agent_name', f'Agent {idx}')} ({analysis.get('agent_model', 'Unknown')})", level=2)
+                    doc.add_paragraph(analysis.get('analysis', 'No analysis provided'))
+                    if analysis.get('response_time_ms'):
+                        doc.add_paragraph(f"Response Time: {analysis['response_time_ms']}ms")
+                    doc.add_paragraph("")
+
+            # Internal citations
+            if research_data.get('internal_citations'):
+                doc.add_heading(f'Internal Citations ({len(research_data["internal_citations"])})', level=1)
+                for i, citation in enumerate(research_data['internal_citations'], 1):
+                    doc.add_heading(f'[{i}] {citation["document_name"]}', level=2)
+
+                    # Citation metadata table
+                    cite_table = doc.add_table(rows=3, cols=2)
+                    cite_table.style = 'Table Grid'
+                    cite_table.cell(0, 0).text = 'Collection'
+                    cite_table.cell(0, 1).text = citation.get('collection_name', 'N/A')
+                    cite_table.cell(1, 0).text = 'Page'
+                    cite_table.cell(1, 1).text = str(citation.get('page_number', 'N/A'))
+                    cite_table.cell(2, 0).text = 'Relevance Score'
+                    cite_table.cell(2, 1).text = f"{citation.get('relevance_score', 0):.2f}"
+
+                    # Excerpt
+                    if citation.get('excerpt'):
+                        doc.add_paragraph("")
+                        doc.add_paragraph("Excerpt:", style='Heading 3')
+                        excerpt_para = doc.add_paragraph(citation['excerpt'])
+                        excerpt_para.style = 'Quote'
+
+                    doc.add_paragraph("")
+
+            # External citations
+            if research_data.get('external_citations'):
+                doc.add_heading(f'External Citations ({len(research_data["external_citations"])})', level=1)
+                start_idx = len(research_data.get('internal_citations', [])) + 1
+                for i, citation in enumerate(research_data['external_citations'], start_idx):
+                    doc.add_heading(f'[{i}] {citation["document_name"]}', level=2)
+
+                    # Citation info
+                    if citation.get('citation_format'):
+                        doc.add_paragraph(f"Citation: {citation['citation_format']}")
+                    if citation.get('url'):
+                        doc.add_paragraph(f"URL: {citation['url']}")
+                    if citation.get('metadata'):
+                        metadata = citation['metadata']
+                        if metadata.get('court'):
+                            doc.add_paragraph(f"Court: {metadata['court']}")
+                        if metadata.get('date'):
+                            doc.add_paragraph(f"Date: {metadata['date']}")
+                    if citation.get('relevance_score'):
+                        doc.add_paragraph(f"Relevance: {citation['relevance_score']*100:.0f}%")
+
+                    # Excerpt
+                    if citation.get('excerpt'):
+                        doc.add_paragraph("")
+                        doc.add_paragraph("Excerpt:", style='Heading 3')
+                        excerpt_para = doc.add_paragraph(citation['excerpt'])
+                        excerpt_para.style = 'Quote'
+
+                    doc.add_paragraph("")
+
+            doc_bytes = self._document_to_bytes(doc)
+            logger.info("Exported legal research to Word document")
+            return doc_bytes
+
+        except Exception as e:
+            logger.error(f"Failed to export legal research to Word: {str(e)}")
             raise e
 
     def export_markdown_to_word(self, title: str, markdown_content: str) -> bytes:
@@ -893,7 +1019,136 @@ class WordExportService:
             table.cell(i, 1).text = value
         
         doc.add_paragraph("")
-    
+
+    def export_markdown_to_word_with_pandoc(
+        self,
+        title: str,
+        markdown_content: str,
+        reference_docx: Optional[str] = None,
+        include_toc: bool = True,
+        number_sections: bool = True
+    ) -> bytes:
+        """
+        Export markdown to Word using Pandoc for professional formatting.
+        Based on mil_test_plan_gen.ipynb's write_docx_with_pandoc.
+
+        Args:
+            title: Document title
+            markdown_content: Markdown content to convert
+            reference_docx: Path to reference .docx for styling (optional)
+            include_toc: Whether to include table of contents
+            number_sections: Whether to number sections automatically
+
+        Returns:
+            bytes: Word document content
+
+        Raises:
+            RuntimeError: If Pandoc is not available
+        """
+        try:
+            logger.info(f"Exporting '{title}' to Word using Pandoc")
+
+            # Ensure pandoc is available
+            self._ensure_pandoc()
+
+            # Sanitize markdown first
+            try:
+                from services.markdown_sanitization_service import MarkdownSanitizationService
+                markdown_content = MarkdownSanitizationService.prepare_for_pandoc(markdown_content)
+                logger.debug("Markdown sanitized for Pandoc")
+            except Exception as e:
+                logger.warning(f"Markdown sanitization failed, using raw content: {e}")
+
+            # Add title if not present
+            if not markdown_content.startswith('# '):
+                markdown_content = f"# {title}\n\n{markdown_content}"
+
+            # Create temp files
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, encoding='utf-8') as tmp_md:
+                tmp_md.write(markdown_content)
+                tmp_md_path = tmp_md.name
+
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.docx', delete=False) as tmp_docx:
+                tmp_docx_path = tmp_docx.name
+
+            try:
+                # Build pandoc command
+                pandoc_args = [
+                    'pandoc',
+                    tmp_md_path,
+                    '-f', 'gfm+pipe_tables+autolink_bare_uris',  # GitHub-flavored markdown
+                    '-t', 'docx',
+                    '-o', tmp_docx_path,
+                ]
+
+                if include_toc:
+                    pandoc_args.extend(['--toc', '--toc-depth=3'])
+
+                if number_sections:
+                    pandoc_args.append('--number-sections')
+
+                if reference_docx and os.path.exists(reference_docx):
+                    pandoc_args.extend(['--reference-doc', reference_docx])
+                    logger.info(f"Using reference document: {reference_docx}")
+
+                # Run pandoc
+                logger.debug(f"Running pandoc command: {' '.join(pandoc_args)}")
+                result = subprocess.run(
+                    pandoc_args,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+
+                if result.returncode != 0:
+                    logger.error(f"Pandoc failed: {result.stderr}")
+                    raise RuntimeError(f"Pandoc conversion failed: {result.stderr}")
+
+                # Read generated docx
+                with open(tmp_docx_path, 'rb') as f:
+                    docx_bytes = f.read()
+
+                logger.info(f"Pandoc export successful: {len(docx_bytes)} bytes, TOC={include_toc}, numbered={number_sections}")
+                return docx_bytes
+
+            finally:
+                # Cleanup temp files
+                try:
+                    os.unlink(tmp_md_path)
+                    os.unlink(tmp_docx_path)
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp files: {e}")
+
+        except RuntimeError as e:
+            # Pandoc not available or conversion failed
+            logger.error(f"Pandoc export failed: {e}")
+            # Fallback to python-docx
+            logger.info("Falling back to python-docx export")
+            return self.export_markdown_to_word(title, markdown_content)
+        except Exception as e:
+            logger.error(f"Unexpected error in Pandoc export: {e}")
+            # Fallback to python-docx
+            return self.export_markdown_to_word(title, markdown_content)
+
+    def _ensure_pandoc(self):
+        """Ensure pandoc is installed and available"""
+        try:
+            result = subprocess.run(['pandoc', '--version'], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                version = result.stdout.decode().splitlines()[0]
+                logger.info(f"Pandoc available: {version}")
+                return
+        except FileNotFoundError:
+            logger.error("Pandoc executable not found")
+        except Exception as e:
+            logger.error(f"Pandoc check failed: {e}")
+
+        raise RuntimeError(
+            "Pandoc is not installed or not in PATH. Please install via: "
+            "brew install pandoc (macOS), apt-get install pandoc (Linux), "
+            "or download from https://pandoc.org/installing.html"
+        )
+
     def _document_to_bytes(self, doc: Document) -> bytes:
         """Convert Document object to bytes."""
         doc_io = BytesIO()

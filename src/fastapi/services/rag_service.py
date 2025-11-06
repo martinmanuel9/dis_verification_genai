@@ -9,16 +9,16 @@ from sqlalchemy.orm import Session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import chromadb
-from langchain_core.messages import HumanMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema import Document
-from langchain.chains.question_answering import load_qa_chain
 from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
+from services.llm_invoker import LLMInvoker
 
 from services.database import (
     SessionLocal,
     ComplianceAgent,
-    DebateSession,
+    # DebateSession removed in Phase 5 - no longer needed for debate sequences
     log_compliance_result,
     log_agent_response,
     log_agent_session,
@@ -27,6 +27,7 @@ from services.database import (
     SessionType,
     AnalysisType
 )
+from repositories.chat_repository import ChatRepository
 
 logger = logging.getLogger("RAG_SERVICE_LOGGER")
 
@@ -362,50 +363,73 @@ class RAGService:
         collection_name: str,
         model_name: str,
         top_k: Optional[int] = None,
+        where: Optional[Dict] = None,
         include_citations: bool = True
-    ) -> Tuple[str, int]:
+    ) -> Tuple[str, int, List[Dict[str, Any]], str]:
         """
         1) Pulls the top-k docs from ChromaDB via your API
         2) Stuffs them into a LangChain QA chain
-        3) Returns (answer, response_time_ms)
+        3) Returns (answer, response_time_ms, metadata_list, formatted_citations)
 
         Args:
             query: The search query
             collection_name: Name of the collection to search
             model_name: LLM model to use for generation
             top_k: Number of documents to retrieve (optional, uses self.n_results if not specified)
-            include_citations: If True, appends document citations to the response
+            where: Optional filter dict for document filtering (e.g., {"document_name": "contract.pdf"})
+            include_citations: If True, returns citation metadata separately
 
         Returns:
-            Tuple of (answer_with_citations, response_time_ms)
+            Tuple of (answer, response_time_ms, metadata_list, formatted_citations)
         """
         # 1) fetch docs with metadata
         docs, found, metadata_list = self.get_relevant_documents(
             query=query,
             collection_name=collection_name,
             top_k=top_k,
-            include_metadata=include_citations
+            where=where,
+            include_metadata=True
         )
         if not found:
-            return "No relevant documents found.", 0
+            return "No relevant documents found.", 0, [], ""
 
         # 2) wrap for LangChain
         lc_docs = [Document(page_content=d) for d in docs]
 
-        # 3) build a simple "stuff" QA chain
+        # 3) build a modern LCEL QA chain
         llm = get_llm(model_name=model_name)
-        chain = load_qa_chain(llm, chain_type="stuff")
+
+        # Create prompt template for question answering
+        prompt = ChatPromptTemplate.from_template("""Answer the question based on the following context:
+
+{context}
+
+Question: {question}
+
+Answer:""")
+
+        # Create the chain using LCEL (LangChain Expression Language)
+        chain = (
+            {
+                "context": lambda x: "\n\n".join([doc.page_content for doc in x["documents"]]),
+                "question": lambda x: x["question"]
+            }
+            | prompt
+            | llm
+        )
 
         start = time.time()
-        answer = chain.run(input_documents=lc_docs, question=query)
+        result = chain.invoke({"documents": lc_docs, "question": query})
+        # Extract text content from result (handles both string and message types)
+        answer = result.content if hasattr(result, 'content') else str(result)
         rt_ms = int((time.time() - start) * 1000)
 
-        # 4) Append citations if requested
+        # 4) Format citations separately (don't append to answer)
+        formatted_citations = ""
         if include_citations and metadata_list:
-            citations = self._format_document_citations(metadata_list)
-            answer = answer + citations
+            formatted_citations = self._format_document_citations(metadata_list)
 
-        return answer, rt_ms
+        return answer, rt_ms, metadata_list, formatted_citations
 
 
     def process_query_with_rag(
@@ -414,35 +438,38 @@ class RAGService:
         collection_name: str,
         model_name: str,
         top_k: Optional[int] = None,
+        where: Optional[Dict] = None,
         include_citations: bool = True
-    ) -> Tuple[str, int]:
+    ) -> Tuple[str, int, List[Dict[str, Any]], str]:
         """
         Simple RAG entrypoint that:
             1) Retrieves top-k docs
             2) Runs a 'stuff'-style QA chain
-            3) Returns (response, response_time_ms)
+            3) Returns (response, response_time_ms, metadata_list, formatted_citations)
 
         Args:
             query_text: The user query
             collection_name: Name of the collection to search
             model_name: LLM model to use
             top_k: Number of documents to retrieve (optional)
-            include_citations: If True, includes document citations with similarity scores
+            where: Optional filter dict for document filtering (e.g., {"document_name": "contract.pdf"})
+            include_citations: If True, returns document citations separately
 
         Returns:
-            Tuple of (answer_string, response_time_ms)
+            Tuple of (answer_string, response_time_ms, metadata_list, formatted_citations)
         """
 
-        answer, rt_ms = self.run_rag_chain(
+        answer, rt_ms, metadata_list, formatted_citations = self.run_rag_chain(
             query=query_text,
             collection_name=collection_name,
             model_name=model_name,
             top_k=top_k,
+            where=where,
             include_citations=include_citations
         )
         logger.info(f"RAG response in rag_service: {answer[:200]}... (took {rt_ms} ms)")
 
-        return answer, rt_ms
+        return answer, rt_ms, metadata_list, formatted_citations
         
         
         
@@ -594,9 +621,6 @@ class RAGService:
                 include_metadata=include_citations
             )
 
-            # Get LLM for this agent
-            llm = self.get_llm_service(agent["model_name"])
-
             if docs_found and relevant_docs:
                 logger.info(f"Using RAG mode with {len(relevant_docs)} documents")
 
@@ -620,14 +644,8 @@ INSTRUCTIONS:
 
                 full_prompt = f"{agent['system_prompt']}\n\n{formatted_user_prompt}"
 
-                # Use direct LLM invoke (like chat endpoint)
-                response = llm.invoke([HumanMessage(content=full_prompt)])
-
-                # Handle both response types
-                if hasattr(response, 'content'):
-                    final_response = response.content
-                else:
-                    final_response = str(response)
+                # Use LLMInvoker for clean invocation
+                final_response = LLMInvoker.invoke(model_name=agent['model_name'], prompt=full_prompt)
 
                 response_time_ms = int((time.time() - start_time) * 1000)
                 processing_method = f"rag_enhanced_{agent['model_name']}"
@@ -647,14 +665,8 @@ INSTRUCTIONS:
                 formatted_user_prompt = agent["user_prompt_template"].replace("{data_sample}", query_text)
                 full_prompt = f"{agent['system_prompt']}\n\n{formatted_user_prompt}"
 
-                # Use direct LLM invoke
-                response = llm.invoke([HumanMessage(content=full_prompt)])
-
-                # Handle both response types
-                if hasattr(response, 'content'):
-                    final_response = response.content
-                else:
-                    final_response = str(response)
+                # Use LLMInvoker for clean invocation
+                final_response = LLMInvoker.invoke(model_name=agent['model_name'], prompt=full_prompt)
 
                 response_time_ms = int((time.time() - start_time) * 1000)
                 processing_method = f"direct_{agent['model_name']}"
@@ -756,7 +768,34 @@ INSTRUCTIONS:
             total_response_time_ms=total_time,
             status='completed'
         )
-        
+
+        # Save to chat history for unified history tracking
+        try:
+            chat_repo = ChatRepository(db)
+
+            # Format response for history display
+            model_names = list(set([agent["model_name"] for agent in self.compliance_agents]))
+
+            response_summary = f"**RAG Agent Analysis** ({len(agent_ids)} agents, collection: {collection_name})\n\n"
+            for idx, (agent_name, response_text) in enumerate(results.items(), 1):
+                response_summary += f"**{idx}. {agent_name}:**\n{response_text}\n\n"
+
+            chat_repo.create_chat_entry(
+                user_query=query_text,
+                response=response_summary,
+                model_used=", ".join(model_names),
+                collection_name=collection_name,
+                query_type="rag_agent",
+                response_time_ms=total_time,
+                session_id=session_id,
+                source_documents=None
+            )
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to save RAG agent check to chat history: {e}")
+            # Don't fail the entire operation if chat history save fails
+            db.rollback()
+
         return {
             "agent_responses": results,
             "collection_used": collection_name,
@@ -778,18 +817,24 @@ INSTRUCTIONS:
             user_query=query_text,
             collection_name=collection_name
         )
-        
-        # Clear existing debate sessions
-        db.query(DebateSession).filter(DebateSession.session_id == session_id).delete()
-        db.commit()
-        
-        # Create new debate sessions
-        for idx, agent_id in enumerate(agent_ids):
-            db.add(DebateSession(session_id=session_id, compliance_agent_id=agent_id, debate_order=idx + 1))
-        db.commit()
-        
-        # Load debate agents
-        debate_agents = self.load_debate_agents(session_id)
+
+        # NOTE: DebateSession table was removed in Phase 5
+        # Debate sequences no longer need session tracking in a separate table
+        # Agent responses are tracked in agent_responses table with session_id
+
+        # Load agents directly by IDs instead of querying debate_sessions
+        debate_agents = []
+        for agent_id in agent_ids:
+            agent = db.query(ComplianceAgent).filter(ComplianceAgent.id == agent_id).first()
+            if agent:
+                debate_agents.append({
+                    "id": agent.id,
+                    "name": agent.name,
+                    "model_name": agent.model_name,
+                    "system_prompt": agent.system_prompt,
+                    "user_prompt_template": agent.user_prompt_template,
+                    "temperature": agent.temperature
+                })
         
         debate_chain = []
         cumulative_context = f"Original user query: {query_text}\n\n"
@@ -829,7 +874,36 @@ INSTRUCTIONS:
             total_response_time_ms=total_time,
             status='completed'
         )
-        
+
+        # Save to chat history for unified history tracking
+        try:
+            chat_repo = ChatRepository(db)
+
+            # Format response for history display
+            model_names = list(set([agent["model_name"] for agent in debate_agents]))
+
+            response_summary = f"**RAG Debate Sequence** ({len(agent_ids)} agents, collection: {collection_name})\n\n"
+            for idx, round_result in enumerate(debate_chain, 1):
+                agent_name = round_result.get('agent_name', 'Unknown Agent')
+                response_text = round_result.get('response', 'No response')
+                response_summary += f"**Round {idx}: {agent_name}**\n{response_text}\n\n"
+
+            chat_repo.create_chat_entry(
+                user_query=query_text,
+                response=response_summary,
+                model_used=", ".join(model_names),
+                collection_name=collection_name,
+                query_type="rag_debate_sequence",
+                response_time_ms=total_time,
+                session_id=session_id,
+                source_documents=None
+            )
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to save RAG debate sequence to chat history: {e}")
+            # Don't fail the entire operation if chat history save fails
+            db.rollback()
+
         return session_id, debate_chain
 
     def load_selected_compliance_agents(self, agent_ids: List[int]):

@@ -30,19 +30,34 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
             help="Select a template to auto-populate the form fields"
         )
 
-    # Clear form fields when template changes
+    # Handle template changes and populate form fields
     template_state_key = pref("current_template")
+    template_changed = False
+
     if template_state_key not in st.session_state:
+        # First time - set the template
         st.session_state[template_state_key] = selected_template
+        template_changed = True
     elif st.session_state[template_state_key] != selected_template:
-        # Template changed - clear all form-related session state
+        # Template changed
         st.session_state[template_state_key] = selected_template
-        # Clear form field keys to allow repopulation
+        template_changed = True
+
+    # If template changed or first selection, populate form fields
+    if template_changed and selected_template != "Custom":
+        template = templates[selected_template]
+        # Populate session state with template values
+        st.session_state[pref("agent_name")] = f"Custom {selected_template}"
+        st.session_state[pref("system_prompt")] = template["system_prompt"]
+        st.session_state[pref("user_prompt")] = template["user_prompt"]
+        st.session_state[pref("temperature")] = template.get("temperature", 0.3)
+        st.session_state[pref("max_tokens")] = template.get("max_tokens", 2000)
+        st.rerun()
+    elif template_changed and selected_template == "Custom":
+        # Clear form fields for custom template
         keys_to_clear = [
             pref("agent_name"), pref("model_select"), pref("temperature"),
-            pref("max_tokens"), pref("system_prompt"), pref("user_prompt"),
-            pref("harvard_legal"), pref("google_scholar_legal"),
-            pref("courtlistener_legal"), pref("justia_legal"), pref("legal_collection")
+            pref("max_tokens"), pref("system_prompt"), pref("user_prompt")
         ]
         for key in keys_to_clear:
             if key in st.session_state:
@@ -63,7 +78,6 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
         default_tokens = template.get("max_tokens", 2000)
         default_name = f"Custom {selected_template}"
         recommended_model = template.get("recommended_model", "gpt-4")
-        default_legal_research = template.get("default_legal_research", False)
     else:
         default_system_prompt = ""
         default_user_prompt = ""
@@ -71,7 +85,6 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
         default_tokens = 2000
         default_name = ""
         recommended_model = "gpt-4"
-        default_legal_research = False
     
     # Get available models from config
     available_models = config.get_available_models()
@@ -131,80 +144,13 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
                 st.info("GPT-3.5 may benefit from slightly higher temperatures (0.3-0.7) for creativity")
             
             max_tokens = st.number_input(
-                "Max Tokens", 
-                100, 4000, 
-                default_tokens, 
+                "Max Tokens",
+                100, 4000,
+                default_tokens,
                 100,
                 key=pref("max_tokens"),
                 help="Maximum response length"
             )
-            
-            # Agent Tools Configuration
-            st.subheader("Agent Capabilities")
-            
-            st.markdown("**Legal Research Tools**")
-            st.info("Select which legal databases this agent can access for research")
-            
-            # Individual legal database toggles (like in legal research component)
-            col_legal1, col_legal2 = st.columns(2)
-            
-            with col_legal1:
-                harvard_enabled = st.checkbox(
-                    "Harvard Caselaw Access Project",
-                    value=default_legal_research,
-                    key=pref("harvard_legal"),
-                    help="Enable access to Harvard's comprehensive caselaw database"
-                )
-                
-                google_scholar_enabled = st.checkbox(
-                    "Google Scholar",
-                    value=False,
-                    key=pref("google_scholar_legal"),
-                    help="Enable access to Google Scholar legal database via SerpApi"
-                )
-            
-            with col_legal2:
-                courtlistener_enabled = st.checkbox(
-                    "CourtListener",
-                    value=default_legal_research,
-                    key=pref("courtlistener_legal"),
-                    help="Enable access to CourtListener federal and state case database"
-                )
-                
-                justia_enabled = st.checkbox(
-                    "Justia",
-                    value=False,
-                    key=pref("justia_legal"),
-                    help="Enable access to Justia legal research database"
-                )
-            
-            # Build legal sources list
-            legal_sources = []
-            selected_api_sources = []
-            
-            if harvard_enabled:
-                legal_sources.append("Harvard Caselaw Access Project")
-                selected_api_sources.append("caselaw")
-            if courtlistener_enabled:
-                legal_sources.append("CourtListener")
-                selected_api_sources.append("courtlistener")
-            if google_scholar_enabled:
-                legal_sources.append("Google Scholar")
-                selected_api_sources.append("serpapi")
-            if justia_enabled:
-                legal_sources.append("Justia")
-                selected_api_sources.append("justia")
-            
-            legal_research_enabled = len(selected_api_sources) > 0
-            
-            # Default collection for storing results (always show if any legal research enabled)
-            if legal_research_enabled:
-                default_collection = st.text_input(
-                    "Default RAG Collection",
-                    value="agent_legal_research",
-                    key=pref("legal_collection"),
-                    help="Default ChromaDB collection where legal research results will be stored"
-                )
         
         with col2:
             # System prompt
@@ -287,17 +233,10 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
                 for error in validation_errors:
                     st.error(f"{error}")
                 return {"success": False, "errors": validation_errors}
-            
-            # Build tools configuration
+
+            # Build tools configuration (placeholder for future tools)
             tools_enabled = {}
-            
-            if legal_research_enabled:
-                tools_enabled["legal_research"] = {
-                    "enabled": True,
-                    "sources": selected_api_sources if 'selected_api_sources' in locals() else ["caselaw", "courtlistener"],
-                    "default_collection": default_collection if 'default_collection' in locals() else "agent_legal_research"
-                }
-            
+
             # Automatically append {data_sample} to user prompt template if not present
             final_user_prompt = user_prompt_template.strip()
             if "{data_sample}" not in final_user_prompt:
@@ -321,20 +260,15 @@ def create_agent_form(template_category="general", key_prefix="", form_title="Cr
 
                 if result:
                     st.success(f"Agent '{agent_name}' created successfully!")
-                    
+
                     # Show success details
-                    tools_info = ""
-                    if legal_research_enabled:
-                        sources_list = ', '.join(legal_sources) if 'legal_sources' in locals() and legal_sources else "Default sources"
-                        tools_info = f"\n    - **Legal Research**: Enabled ({sources_list})"
-                    
                     st.info(f"""
                     **Agent Created:**
                     - **ID**: {result.get('agent_id')}
                     - **Name**: {result.get('agent_name')}
                     - **Model**: {agent_model_name}
                     - **Temperature**: {temperature}
-                    - **Max Tokens**: {max_tokens}{tools_info}
+                    - **Max Tokens**: {max_tokens}
                     """)
                     
                     st.markdown("**Next Steps:**")

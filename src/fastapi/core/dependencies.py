@@ -1,22 +1,3 @@
-"""
-FastAPI dependency injection configuration.
-
-This module defines all dependency injection functions for FastAPI routes,
-providing a centralized place for managing dependencies like database sessions,
-repositories, services, and external clients.
-
-Usage:
-    from fastapi import Depends
-    from core.dependencies import get_db, get_uow, get_agent_service
-
-    @router.get("/agents")
-    def list_agents(
-        db: Session = Depends(get_db),
-        agent_service: AgentService = Depends(get_agent_service)
-    ):
-        return agent_service.get_all_agents()
-"""
-
 from typing import Generator
 from functools import lru_cache
 from sqlalchemy.orm import Session
@@ -126,20 +107,6 @@ def get_agent_repository(db: Session = Depends(get_db)):
     return AgentRepository(db)
 
 
-def get_session_repository(db: Session = Depends(get_db)):
-    """
-    Get SessionRepository instance.
-
-    Args:
-        db: Database session (automatically injected)
-
-    Returns:
-        SessionRepository: Session data access layer
-    """
-    from repositories import SessionRepository
-    return SessionRepository(db)
-
-
 def get_response_repository(db: Session = Depends(get_db)):
     """
     Get ResponseRepository instance.
@@ -182,6 +149,20 @@ def get_citation_repository(db: Session = Depends(get_db)):
     return CitationRepository(db)
 
 
+def get_session_repository(db: Session = Depends(get_db)):
+    """
+    Get session repository for database operations.
+
+    Args:
+        db: Database session (automatically injected)
+
+    Returns:
+        SessionRepository: Repository instance for session CRUD operations
+    """
+    from repositories.session_repository import SessionRepository
+    return SessionRepository(db)
+
+
 def get_chat_repository(db: Session = Depends(get_db)):
     """
     Get ChatRepository instance.
@@ -199,28 +180,6 @@ def get_chat_repository(db: Session = Depends(get_db)):
 # ============================================================================
 # Service Dependencies
 # ============================================================================
-
-def get_session_service(db: Session = Depends(get_db)):
-    """
-    Get SessionService instance.
-
-    Args:
-        db: Database session (automatically injected)
-
-    Returns:
-        SessionService: Session business logic layer
-
-    Example:
-        @router.post("/sessions")
-        def create_session(
-            data: SessionCreate,
-            service: SessionService = Depends(get_session_service)
-        ):
-            return service.log_agent_session(...)
-    """
-    from services import SessionService
-    return SessionService(db)
-
 
 def get_compliance_service(db: Session = Depends(get_db)):
     """
@@ -337,6 +296,23 @@ def get_rag_service(db: Session = Depends(get_db)):
     return RAGService()
 
 
+def get_rag_assessment_service(db: Session = Depends(get_db)):
+    """
+    Get RAGAssessmentService instance.
+
+    Args:
+        db: Database session (automatically injected)
+
+    Returns:
+        RAGAssessmentService: RAG assessment service
+
+    Note:
+        This service provides RAG quality assessment and metrics.
+    """
+    from services.rag_assessment_service import RAGAssessmentService
+    return RAGAssessmentService()
+
+
 def get_agent_service_legacy():
     """
     Get AgentService instance (legacy - not yet migrated).
@@ -352,16 +328,3 @@ def get_agent_service_legacy():
     return AgentService()
 
 
-def get_rag_assessment_service():
-    """
-    Get RAGAssessmentService instance (legacy - not yet migrated).
-
-    Returns:
-        RAGAssessmentService: RAG assessment and analytics service
-
-    Note:
-        This service provides quality assessment and performance analytics for RAG operations.
-        It has not been migrated to use repositories yet.
-    """
-    from services.rag_assessment_service import RAGAssessmentService
-    return RAGAssessmentService()

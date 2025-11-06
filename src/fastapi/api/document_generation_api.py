@@ -13,14 +13,25 @@ from services.llm_service import LLMService
 from schemas import EvaluateRequest, EvaluateResponse
 import os
 from services.word_export_service import WordExportService
+from services.test_card_service import TestCardService
+from services.markdown_sanitization_service import MarkdownSanitizationService
+from services.pairwise_synthesis_service import PairwiseSynthesisService
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
-import logging 
+import logging
 from typing import Dict, Any
 import uuid
 import base64
 import redis
 from datetime import datetime
+from schemas.test_card import (
+    TestCardRequest,
+    TestCardResponse,
+    TestCardBatchRequest,
+    TestCardBatchResponse,
+    ExportTestPlanWithCardsRequest,
+    ExportTestPlanWithCardsResponse,
+)
 
 logger = logging.getLogger("DOC_GEN_API_LOGGER")
 doc_gen_api_router = APIRouter(prefix="/doc_gen", tags=["doc_gen"])
@@ -282,6 +293,24 @@ def get_evaluation_service() -> EvaluationService:
         llm=LLMService()
     )
 
+def get_test_card_service() -> TestCardService:
+    """Dependency provider for TestCardService"""
+    return TestCardService(llm_service=LLMService())
+
+def get_word_export_service() -> WordExportService:
+    """Dependency provider for WordExportService"""
+    return WordExportService()
+
+def get_pairwise_synthesis_service() -> PairwiseSynthesisService:
+    """Dependency provider for PairwiseSynthesisService"""
+    return PairwiseSynthesisService(llm_service=LLMService())
+
+def get_redis_client() -> redis.Redis:
+    """Dependency provider for Redis client"""
+    redis_host = os.getenv("REDIS_HOST", "redis")
+    redis_port = int(os.getenv("REDIS_PORT", 6379))
+    return redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
 @doc_gen_api_router.post("/evaluate_doc", response_model=EvaluateResponse)
 async def evaluate_doc(
     req: EvaluateRequest,
@@ -292,19 +321,27 @@ async def evaluate_doc(
         # generate a session_id so you can track history
         doc_session_id = str(uuid.uuid4())
 
-        answer, rt_ms = eval_service.evaluate_document(
+        # Evaluate document with citation support
+        answer, rt_ms, metadata_list, formatted_citations = eval_service.evaluate_document(
             document_id     = req.document_id,
             collection_name = req.collection_name,
             prompt          = req.prompt,
             top_k           = req.top_k,
             model_name      = req.model_name,
             session_id      = doc_session_id,
+            include_citations = True,
         )
-        # Save chat history
+
+        # Combine answer with formatted citations for storage (same as chat)
+        full_response = answer
+        if formatted_citations:
+            full_response = answer + "\n\n" + formatted_citations
+
+        # Save chat history with citations included
         try:
             chat_repo.create_chat_entry(
                 user_query=req.prompt,
-                response=answer,
+                response=full_response,
                 model_used=req.model_name,
                 collection_name=req.collection_name,
                 query_type="rag",
@@ -316,6 +353,23 @@ async def evaluate_doc(
             logger.error(f"Failed to save evaluation history: {e}")
             db.rollback()
 
+        # Prepare citation data for response
+        citations = []
+        if metadata_list:
+            for meta in metadata_list:
+                # Extract citation information from metadata
+                citation_data = {
+                    "document_index": meta.get("document_index"),
+                    "distance": meta.get("distance"),
+                    "quality_tier": meta.get("quality_tier"),
+                    "distance_explanation": meta.get("distance_explanation"),
+                    "excerpt": meta.get("metadata", {}).get("text", meta.get("document_text", ""))[:500],  # First 500 chars
+                    "source_file": meta.get("metadata", {}).get("document_name", ""),
+                    "page_number": meta.get("metadata", {}).get("page_number"),
+                    "section_name": meta.get("metadata", {}).get("section_title"),
+                }
+                citations.append(citation_data)
+
         return EvaluateResponse(
             document_id     = req.document_id,
             collection_name = req.collection_name,
@@ -324,6 +378,8 @@ async def evaluate_doc(
             response        = answer,
             response_time_ms= rt_ms,
             session_id      = doc_session_id,
+            citations       = citations if citations else None,
+            formatted_citations = formatted_citations if formatted_citations else None,
         )
     except Exception as e:
         db.rollback()
@@ -613,3 +669,477 @@ async def word_export_demo():
             }
         }
     }
+
+
+# ============================================================================
+# TEST CARD GENERATION ENDPOINTS (Phase 2)
+# ============================================================================
+
+@doc_gen_api_router.post("/generate-test-card", response_model=TestCardResponse)
+async def generate_test_card(
+    req: TestCardRequest,
+    test_card_service: TestCardService = Depends(get_test_card_service)
+):
+    """
+    Generate a test card from test rules markdown.
+
+    Converts test procedures and rules into an executable test card with:
+    - Test ID
+    - Test Title
+    - Step-by-step procedures
+    - Expected results
+    - Acceptance criteria
+    - Pass/Fail tracking checkboxes
+
+    Args:
+        req: Test card request with section title and rules markdown
+
+    Returns:
+        Test card in requested format (markdown_table, json, or docx_table)
+
+    Example:
+        ```json
+        {
+            "section_title": "4.1 Power Supply Requirements",
+            "rules_markdown": "## Requirements\n**Test Rules:**\n1. Verify voltage...",
+            "format": "markdown_table"
+        }
+        ```
+    """
+    try:
+        logger.info(f"Generating test card for section: {req.section_title}")
+
+        test_card_content = await run_in_threadpool(
+            test_card_service.generate_test_card_from_rules,
+            section_title=req.section_title,
+            rules_markdown=req.rules_markdown,
+            format=req.format
+        )
+
+        # Count tests based on format
+        test_count = 0
+        if req.format == "markdown_table":
+            # Count rows starting with | TC-
+            test_count = len([line for line in test_card_content.split('\n')
+                            if line.strip().startswith('| TC-')])
+        elif req.format == "json":
+            import json
+            try:
+                test_cards = json.loads(test_card_content)
+                test_count = len(test_cards)
+            except json.JSONDecodeError:
+                test_count = 0
+
+        logger.info(f"Generated {test_count} test cards for {req.section_title}")
+
+        return TestCardResponse(
+            section_title=req.section_title,
+            test_card_content=test_card_content,
+            format=req.format,
+            test_count=test_count
+        )
+
+    except Exception as e:
+        logger.error(f"Test card generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Test card generation failed: {str(e)}")
+
+
+@doc_gen_api_router.post("/generate-test-cards-batch", response_model=TestCardBatchResponse)
+async def generate_test_cards_batch(
+    req: TestCardBatchRequest,
+    test_card_service: TestCardService = Depends(get_test_card_service),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """
+    Generate test cards for multiple sections in a pipeline.
+
+    Retrieves section data from Redis pipeline and generates test cards
+    for all sections or a specified subset.
+
+    Args:
+        req: Batch request with pipeline ID and optional section filter
+
+    Returns:
+        Dictionary mapping section titles to test card content
+
+    Example:
+        ```json
+        {
+            "pipeline_id": "pipeline_abc123def456",
+            "format": "markdown_table",
+            "section_titles": ["Section 4.1", "Section 4.2"]  // optional
+        }
+        ```
+    """
+    try:
+        logger.info(f"Generating test cards for pipeline: {req.pipeline_id}")
+
+        # Generate test cards for all sections in pipeline
+        test_cards = await run_in_threadpool(
+            test_card_service.generate_test_cards_for_pipeline,
+            pipeline_id=req.pipeline_id,
+            redis_client=redis_client,
+            format=req.format
+        )
+
+        # Filter by section titles if specified
+        if req.section_titles:
+            test_cards = {
+                title: content
+                for title, content in test_cards.items()
+                if title in req.section_titles
+            }
+
+        # Count total tests
+        total_tests = 0
+        for content in test_cards.values():
+            if req.format == "markdown_table":
+                total_tests += len([line for line in content.split('\n')
+                                  if line.strip().startswith('| TC-')])
+            elif req.format == "json":
+                import json
+                try:
+                    total_tests += len(json.loads(content))
+                except json.JSONDecodeError:
+                    pass
+
+        logger.info(f"Generated test cards for {len(test_cards)} sections, {total_tests} total tests")
+
+        return TestCardBatchResponse(
+            pipeline_id=req.pipeline_id,
+            test_cards=test_cards,
+            total_sections=len(test_cards),
+            total_tests=total_tests,
+            format=req.format
+        )
+
+    except Exception as e:
+        logger.error(f"Batch test card generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch generation failed: {str(e)}")
+
+
+@doc_gen_api_router.post("/export-test-plan-with-cards", response_model=ExportTestPlanWithCardsResponse)
+async def export_test_plan_with_cards(
+    req: ExportTestPlanWithCardsRequest,
+    test_card_service: TestCardService = Depends(get_test_card_service),
+    word_export_service: WordExportService = Depends(get_word_export_service),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """
+    Export test plan with embedded test cards to Word document.
+
+    Features:
+    - Includes test card tables after each section
+    - Supports Pandoc export (professional formatting with TOC)
+    - Supports python-docx export (standard formatting)
+    - Automatic markdown sanitization
+    - Optional reference document for styling
+
+    Args:
+        req: Export request with pipeline ID and formatting options
+
+    Returns:
+        Word document as base64-encoded bytes with metadata
+
+    Example:
+        ```json
+        {
+            "pipeline_id": "pipeline_abc123def456",
+            "include_test_cards": true,
+            "export_format": "pandoc",
+            "include_toc": true,
+            "number_sections": true
+        }
+        ```
+    """
+    try:
+        logger.info(f"Exporting test plan with cards: {req.pipeline_id}, format={req.export_format}")
+
+        # Get test plan from Redis
+        final_data = redis_client.hgetall(f"pipeline:{req.pipeline_id}:final_result")
+        if not final_data:
+            raise HTTPException(status_code=404, detail=f"Pipeline result not found: {req.pipeline_id}")
+
+        title = final_data.get("title", "Test Plan")
+        markdown = final_data.get("consolidated_markdown", "")
+
+        if not markdown:
+            raise HTTPException(status_code=404, detail="No markdown content found in pipeline")
+
+        # Enhance markdown with test cards if requested
+        if req.include_test_cards:
+            logger.info("Adding test cards to markdown...")
+            enhanced_markdown = await _add_test_cards_to_markdown(
+                markdown=markdown,
+                test_card_service=test_card_service,
+                pipeline_id=req.pipeline_id,
+                redis_client=redis_client
+            )
+        else:
+            enhanced_markdown = markdown
+
+        # Export based on format
+        if req.export_format == "pandoc":
+            logger.info("Exporting with Pandoc...")
+            word_bytes = await run_in_threadpool(
+                word_export_service.export_markdown_to_word_with_pandoc,
+                title=title,
+                markdown_content=enhanced_markdown,
+                reference_docx=req.reference_docx,
+                include_toc=req.include_toc,
+                number_sections=req.number_sections
+            )
+        else:
+            logger.info("Exporting with python-docx...")
+            # Use existing export_markdown_to_word method if available
+            # For now, we'll use Pandoc with fallback
+            word_bytes = await run_in_threadpool(
+                word_export_service.export_markdown_to_word_with_pandoc,
+                title=title,
+                markdown_content=enhanced_markdown,
+                reference_docx=None,
+                include_toc=False,
+                number_sections=False
+            )
+
+        # Encode to base64
+        b64 = base64.b64encode(word_bytes).decode("utf-8")
+
+        # Generate filename
+        safe_title = title.replace(' ', '_').replace('/', '_')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{safe_title}_with_test_cards_{timestamp}.docx"
+
+        logger.info(f"Export complete: {len(word_bytes)} bytes, filename={filename}")
+
+        return ExportTestPlanWithCardsResponse(
+            filename=filename,
+            content_b64=b64,
+            format=req.export_format,
+            includes_test_cards=req.include_test_cards,
+            file_size_bytes=len(word_bytes)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export with test cards failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+# ============================ PAIRWISE SYNTHESIS ============================
+
+class PairwiseSynthesisRequest(BaseModel):
+    """Request for pairwise section synthesis"""
+    pipeline_id: str
+    synthesis_mode: str = "pairwise"  # "pairwise" or "consecutive"
+    max_workers: int = 4
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "pipeline_id": "pipeline_abc123def456",
+                "synthesis_mode": "pairwise",
+                "max_workers": 4
+            }
+        }
+
+
+class PairwiseSynthesisResponse(BaseModel):
+    """Response from pairwise synthesis"""
+    pipeline_id: str
+    synthesis_mode: str
+    original_sections: int
+    synthesized_sections: int
+    sections: Dict[str, str]  # section_title -> synthesized_content
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "pipeline_id": "pipeline_abc123",
+                "synthesis_mode": "pairwise",
+                "original_sections": 10,
+                "synthesized_sections": 5,
+                "sections": {
+                    "Section 4.1 & 4.2 Combined": "Synthesized content...",
+                    "Section 4.3 & 4.4 Combined": "Synthesized content..."
+                }
+            }
+        }
+
+
+@doc_gen_api_router.post("/pairwise-synthesis", response_model=PairwiseSynthesisResponse)
+async def pairwise_synthesis(
+    req: PairwiseSynthesisRequest,
+    pairwise_service: PairwiseSynthesisService = Depends(get_pairwise_synthesis_service),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """
+    Apply pairwise synthesis to an existing pipeline's sections.
+
+    This reduces redundancy by combining adjacent sections and identifying
+    cross-section dependencies. Based on the notebook's approach.
+
+    Synthesis Modes:
+    - **pairwise**: Combine non-overlapping pairs (1+2, 3+4, 5+6...)
+    - **consecutive**: Combine overlapping pairs (1+2, 2+3, 3+4...)
+
+    Args:
+        req: Pairwise synthesis request
+
+    Returns:
+        Synthesized sections
+
+    Example:
+        Original: 10 sections
+        Pairwise mode: 5 combined sections
+        Consecutive mode: 9 combined sections
+    """
+    try:
+        logger.info(f"Starting pairwise synthesis for pipeline: {req.pipeline_id} (mode: {req.synthesis_mode})")
+
+        # Synthesize sections from pipeline
+        synthesized_sections = await run_in_threadpool(
+            pairwise_service.synthesize_with_redis_pipeline,
+            req.pipeline_id,
+            redis_client,
+            req.synthesis_mode,
+            req.max_workers
+        )
+
+        if not synthesized_sections:
+            logger.warning(f"No sections synthesized for pipeline: {req.pipeline_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No sections found for pipeline or synthesis failed: {req.pipeline_id}"
+            )
+
+        # Count original sections
+        pattern = f"pipeline:{req.pipeline_id}:critic:*"
+        original_keys = redis_client.keys(pattern)
+        original_count = len(original_keys)
+
+        logger.info(f"Pairwise synthesis complete: {original_count} → {len(synthesized_sections)} sections")
+
+        # Optionally: Store synthesized sections back to Redis with new keys
+        # For now, just return them
+        for section_title, content in synthesized_sections.items():
+            # Store with pairwise prefix for retrieval
+            key = f"pipeline:{req.pipeline_id}:pairwise:{section_title}"
+            redis_client.hset(key, mapping={
+                "section_title": section_title,
+                "synthesized_content": content,
+                "synthesis_mode": req.synthesis_mode,
+                "timestamp": datetime.now().isoformat()
+            })
+
+        return PairwiseSynthesisResponse(
+            pipeline_id=req.pipeline_id,
+            synthesis_mode=req.synthesis_mode,
+            original_sections=original_count,
+            synthesized_sections=len(synthesized_sections),
+            sections=synthesized_sections
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pairwise synthesis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Pairwise synthesis failed: {str(e)}")
+
+
+async def _add_test_cards_to_markdown(
+    markdown: str,
+    test_card_service: TestCardService,
+    pipeline_id: str,
+    redis_client: redis.Redis
+) -> str:
+    """
+    Add test card tables after each section in markdown.
+
+    Strategy:
+    1. Parse markdown to identify sections
+    2. For each section, get critic result from Redis
+    3. Generate test card from critic's synthesized rules
+    4. Insert test card table after section
+
+    Args:
+        markdown: Original markdown content
+        test_card_service: Test card service instance
+        pipeline_id: Redis pipeline ID
+        redis_client: Redis client instance
+
+    Returns:
+        Enhanced markdown with test cards inserted
+    """
+    try:
+        # Get all section critic results from Redis
+        pattern = f"pipeline:{pipeline_id}:critic:*"
+        critic_keys = redis_client.keys(pattern)
+
+        logger.info(f"Found {len(critic_keys)} critic sections for pipeline {pipeline_id}")
+
+        sections_with_cards = {}
+        for key in critic_keys:
+            try:
+                critic_data = redis_client.hgetall(key)
+                section_title = critic_data.get("section_title", "")
+                synthesized_rules = critic_data.get("synthesized_rules", "")
+
+                if section_title and synthesized_rules:
+                    # Generate test card
+                    test_card = await run_in_threadpool(
+                        test_card_service.generate_test_card_from_rules,
+                        section_title=section_title,
+                        rules_markdown=synthesized_rules,
+                        format="markdown_table"
+                    )
+                    sections_with_cards[section_title] = test_card
+                    logger.debug(f"Generated test card for: {section_title}")
+            except Exception as e:
+                logger.warning(f"Failed to generate test card for key {key}: {e}")
+                continue
+
+        if not sections_with_cards:
+            logger.warning("No test cards generated, returning original markdown")
+            return markdown
+
+        # Insert test cards into markdown
+        lines = markdown.split('\n')
+        enhanced_lines = []
+        current_section = None
+        section_content_started = False
+
+        for i, line in enumerate(lines):
+            enhanced_lines.append(line)
+
+            # Detect main section headers (## level)
+            if line.startswith('## '):
+                section_header = line[3:].strip()
+
+                # If we just finished a section, insert its test card
+                if current_section and current_section in sections_with_cards:
+                    enhanced_lines.insert(-1, '\n### Test Card\n')
+                    enhanced_lines.insert(-1, sections_with_cards[current_section])
+                    enhanced_lines.insert(-1, '\n')
+
+                current_section = section_header
+                section_content_started = True
+
+            # Check if this is the last line - insert test card for final section
+            if i == len(lines) - 1 and current_section and current_section in sections_with_cards:
+                enhanced_lines.append('\n### Test Card\n')
+                enhanced_lines.append(sections_with_cards[current_section])
+                enhanced_lines.append('\n')
+
+        enhanced_markdown = '\n'.join(enhanced_lines)
+        logger.info(f"Enhanced markdown: added {len(sections_with_cards)} test cards")
+
+        return enhanced_markdown
+
+    except Exception as e:
+        logger.error(f"Failed to add test cards to markdown: {e}")
+        # Return original markdown on error
+        return markdown

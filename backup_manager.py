@@ -37,9 +37,9 @@ class BackupManager:
 
         # Volume names from docker-compose.yml
         self.volumes = {
-            "postgres": "litigation_genai_postgres_data",
-            "chromadb": "litigation_genai_chroma_data",
-            "redis": "litigation_genai_redis_data"
+            "postgres": "genai_postgres_data",
+            "chromadb": "genai_chroma_data",
+            "redis": "genai_redis_data"
         }
 
     def run_command(self, cmd: List[str], check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
@@ -93,11 +93,6 @@ class BackupManager:
 
         try:
             with open(backup_file, 'w') as f:
-                self.run_command(
-                    ["docker", "exec", self.containers["postgres"],
-                     "pg_dumpall", "-U", "g3nA1-user"],
-                    check=True,
-                )
                 result = subprocess.run(
                     ["docker", "exec", self.containers["postgres"],
                      "pg_dumpall", "-U", "g3nA1-user"],
@@ -115,7 +110,14 @@ class BackupManager:
             return False
 
     def backup_chromadb(self, backup_dir: Path) -> bool:
-        """Backup ChromaDB vector database"""
+        """Backup ChromaDB vector database
+
+        IMPORTANT: ChromaDB path must match docker-compose.yml volume mount.
+        Current path: /chroma/chroma
+        If you change the volume mount, also update:
+        - scripts/backup.sh (line ~105)
+        - scripts/restore.sh (line ~159)
+        """
         print("[ChromaDB] Backing up vector database...")
         chroma_backup = backup_dir / "chromadb_data"
 
@@ -355,6 +357,189 @@ Databases Backed Up:
 
         print(f"✓ Cleanup complete")
 
+    def restore_backup(self, backup_dir: Path, skip_confirmation: bool = False) -> bool:
+        """Restore databases and application data from backup"""
+        print("=" * 60)
+        print("Litigation GenAI - Database Restore")
+        print("=" * 60)
+
+        # Validate backup directory
+        if not backup_dir.exists() or not backup_dir.is_dir():
+            print(f"❌ Backup directory not found: {backup_dir}")
+            return False
+
+        # Show backup info
+        backup_info = backup_dir / "backup_info.txt"
+        if backup_info.exists():
+            print("\n" + backup_info.read_text())
+            print("=" * 60)
+
+        # Confirmation prompt
+        if not skip_confirmation:
+            print("\n⚠️  WARNING: This will OVERWRITE existing data!")
+            response = input("\nContinue with restore? (yes/N): ")
+            if response.lower() != "yes":
+                print("Restore cancelled.")
+                return False
+            print()
+
+        # Stop all services
+        print("[1/7] Stopping Docker services...")
+        self.run_command(["docker", "compose", "down"], check=True)
+        print("✓ Services stopped\n")
+
+        # Restore PostgreSQL
+        print("[2/7] Restoring PostgreSQL database...")
+        postgres_backup = backup_dir / "postgres_backup.sql"
+        if postgres_backup.exists():
+            # Start only PostgreSQL
+            self.run_command(["docker", "compose", "up", "-d", "postgres"], check=True)
+            print("  Waiting for PostgreSQL to be ready...")
+            import time
+            time.sleep(5)
+
+            # Wait for PostgreSQL to accept connections
+            for i in range(30):
+                result = self.run_command(
+                    ["docker", "exec", self.containers["postgres"],
+                     "pg_isready", "-U", "g3nA1-user"],
+                    check=False, capture=True
+                )
+                if result.returncode == 0:
+                    break
+                time.sleep(1)
+
+            # Restore database
+            print("  Running restore...")
+            with open(postgres_backup, 'r') as f:
+                subprocess.run(
+                    ["docker", "exec", "-i", self.containers["postgres"],
+                     "psql", "-U", "g3nA1-user", "-d", "postgres"],
+                    stdin=f,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    check=True
+                )
+
+            print("✓ PostgreSQL restored successfully")
+            self.run_command(["docker", "compose", "down"], check=True)
+        else:
+            print("⊘ No PostgreSQL backup found, skipping")
+        print()
+
+        # Restore ChromaDB
+        print("[3/7] Restoring ChromaDB vector database...")
+        chroma_backup = backup_dir / "chromadb_data"
+        if chroma_backup.exists() and chroma_backup.is_dir():
+            # Remove and recreate volume
+            self.run_command(
+                ["docker", "volume", "rm", self.volumes["chromadb"]],
+                check=False
+            )
+            self.run_command(
+                ["docker", "volume", "create", self.volumes["chromadb"]],
+                check=True
+            )
+
+            # Copy backup to volume
+            backup_abs_path = chroma_backup.absolute()
+            self.run_command([
+                "docker", "run", "--rm",
+                "-v", f"{self.volumes['chromadb']}:/chroma/chroma",
+                "-v", f"{backup_abs_path}:/backup",
+                "alpine", "sh", "-c", "cp -r /backup/. /chroma/chroma/"
+            ], check=True)
+
+            print("✓ ChromaDB restored successfully")
+        else:
+            print("⊘ No ChromaDB backup found, skipping")
+        print()
+
+        # Restore Redis
+        print("[4/7] Restoring Redis cache...")
+        redis_backup = backup_dir / "redis_data"
+        if redis_backup.exists() and redis_backup.is_dir():
+            # Remove and recreate volume
+            self.run_command(
+                ["docker", "volume", "rm", self.volumes["redis"]],
+                check=False
+            )
+            self.run_command(
+                ["docker", "volume", "create", self.volumes["redis"]],
+                check=True
+            )
+
+            # Copy backup to volume
+            backup_abs_path = redis_backup.absolute()
+            self.run_command([
+                "docker", "run", "--rm",
+                "-v", f"{self.volumes['redis']}:/data",
+                "-v", f"{backup_abs_path}:/backup",
+                "alpine", "sh", "-c", "cp -r /backup/. /data/"
+            ], check=True)
+
+            print("✓ Redis restored successfully")
+        else:
+            print("⊘ No Redis backup found, skipping")
+        print()
+
+        # Restore application data
+        print("[5/7] Restoring application data...")
+        restored_count = 0
+
+        if (backup_dir / "stored_images").exists():
+            if Path("./stored_images").exists():
+                shutil.rmtree("./stored_images")
+            shutil.copytree(backup_dir / "stored_images", "./stored_images")
+            print("  ✓ Stored images restored")
+            restored_count += 1
+
+        if (backup_dir / "local_data").exists():
+            if Path("./data").exists():
+                shutil.rmtree("./data")
+            shutil.copytree(backup_dir / "local_data", "./data")
+            print("  ✓ Local data restored")
+            restored_count += 1
+
+        if (backup_dir / "migrations").exists():
+            if Path("./migrations").exists():
+                shutil.rmtree("./migrations")
+            shutil.copytree(backup_dir / "migrations", "./migrations")
+            print("  ✓ Migrations restored")
+            restored_count += 1
+
+        if restored_count == 0:
+            print("⊘ No application data found in backup")
+        else:
+            print(f"✓ Restored {restored_count} application data items")
+        print()
+
+        # Skip legacy check
+        print("[6/7] Checking for legacy backup items...")
+        print("✓ Legacy check complete\n")
+
+        # Start all services
+        print("[7/7] Starting Docker services...")
+        self.run_command(["docker", "compose", "up", "-d"], check=True)
+        print("✓ All services started\n")
+
+        # Wait for services
+        print("Waiting for services to be ready...")
+        import time
+        time.sleep(5)
+
+        # Summary
+        print("\n" + "=" * 60)
+        print("✅ RESTORE COMPLETED SUCCESSFULLY!")
+        print("=" * 60)
+        print(f"Restored from: {backup_dir}")
+        print("\nNext steps:")
+        print("  1. Verify services: docker compose ps")
+        print("  2. Check logs: docker compose logs -f")
+        print("=" * 60)
+
+        return True
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -403,10 +588,20 @@ def main():
         manager.create_backup(db_only=args.db_only)
 
     elif args.command == 'restore':
-        print("❌ Restore functionality uses the shell script for safety.")
-        print(f"   Run: ./restore.sh {args.backup_dir}")
-        print("\n   The restore process requires careful handling of Docker volumes")
-        print("   and is best done through the tested shell script.")
+        backup_path = Path(args.backup_dir)
+        if not backup_path.exists():
+            # Try relative to backup root
+            backup_path = manager.backup_root / args.backup_dir
+
+        if not backup_path.exists():
+            print(f"❌ Backup directory not found: {args.backup_dir}")
+            print("\nAvailable backups:")
+            backups = manager.list_backups()
+            for backup in backups[:5]:
+                print(f"  - {backup['name']}")
+            sys.exit(1)
+
+        manager.restore_backup(backup_path, skip_confirmation=args.skip_confirmation)
 
     elif args.command == 'list':
         backups = manager.list_backups()

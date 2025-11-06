@@ -19,11 +19,48 @@ def AI_Agent():
     
     # CREATE NEW AGENT SUB-MODE
     if agent_mode == "Create New Agent":
-        # Use the unified agent creation component
+        st.subheader("Create a New AI Agent")
+
+        # Template category selection
+        template_category = st.radio(
+            "Select Template Category:",
+            ["General Agents", "Rule Development Agents"],
+            horizontal=True,
+            key="agent_template_category",
+            help="Choose agent type: General for quality/systems/test engineering, or Rule Development for document analysis and test plan creation"
+        )
+
+        # Map to template category names
+        category_map = {
+            "General Agents": "general",
+            "Rule Development Agents": "rule_development"
+        }
+
+        selected_category = category_map[template_category]
+
+        # Show info about selected category
+        if selected_category == "rule_development":
+            st.info("""
+            **Rule Development Agents** specialize in:
+            - Extracting testable rules from technical documents
+            - Creating integrated test plans
+            - Analyzing document sections for test generation
+            """)
+        else:
+            st.info("""
+            **General Agents** specialize in:
+            - Systems engineering and requirements analysis
+            - Test engineering and test strategy
+            - Quality engineering and process improvement
+            """)
+
+        st.markdown("---")
+
+        # Use the unified agent creation component with selected category
         create_agent_form(
-            template_category="general",
-            key_prefix="ai_agent",
-            form_title="Create a New AI Agent"
+            template_category=selected_category,
+            key_prefix=f"ai_agent_{selected_category}",
+            form_title=""  # Title already shown above
         )
 
     # MANAGE EXISTING AGENTS SUB-MODE

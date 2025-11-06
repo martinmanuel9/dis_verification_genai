@@ -448,7 +448,6 @@ async def upload_and_process_documents(
         chunk_size,
         chunk_overlap,
         store_images,
-        model_name,
         selected_models,
         request.headers.get("X-OpenAI-API-Key") or openai_api_key,
         enable_ocr,

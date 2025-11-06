@@ -110,6 +110,8 @@ class EvaluateResponse(BaseModel):
         response: Generated response
         response_time_ms: Response time in milliseconds
         session_id: Session identifier
+        citations: List of citations with metadata (optional)
+        formatted_citations: Human-readable citation text (optional)
     """
     document_id: str
     collection_name: str
@@ -118,6 +120,8 @@ class EvaluateResponse(BaseModel):
     response: str
     response_time_ms: int
     session_id: str
+    citations: Optional[List[Dict[str, Any]]] = Field(None, description="List of citation metadata")
+    formatted_citations: Optional[str] = Field(None, description="Human-readable formatted citations")
 
 
 # ============================================================================

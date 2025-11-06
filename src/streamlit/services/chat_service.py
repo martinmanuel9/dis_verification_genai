@@ -12,17 +12,17 @@ class ChatService:
     def send_message(
         self,
         query: str,
-        model: str,
+        model: str,  # Keep parameter name for backward compatibility
         use_rag: bool = False,
         collection_name: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         top_k: int = 5
     ) -> ChatResponse:
-        # Create request object
+        # Create request object using Streamlit's ChatRequest model
         request = ChatRequest(
             query=query,
-            model=model,
+            model=model,  # Use 'model' field name for Streamlit schema
             use_rag=use_rag,
             collection_name=collection_name,
             temperature=temperature,
@@ -30,10 +30,22 @@ class ChatService:
             top_k=top_k
         )
 
+        # Convert to dict and remap to FastAPI's expected field names
+        request_data = request.model_dump() if hasattr(request, 'model_dump') else request.dict()
+        # Map Streamlit field names to FastAPI field names
+        request_data['model_name'] = request_data.pop('model')  # Rename 'model' to 'model_name'
+        # Map use_rag to query_type
+        if request_data.get('use_rag'):
+            request_data['query_type'] = 'rag'
+        else:
+            request_data['query_type'] = 'direct'
+        request_data.pop('use_rag', None)  # Remove use_rag as API doesn't use it
+        request_data.pop('top_k', None)  # Remove top_k as it's not in API schema
+
         # Send request
         response_data = self.client.post(
             self.endpoints.chat,
-            data=request.dict(),
+            data=request_data,
             timeout=300
         )
 

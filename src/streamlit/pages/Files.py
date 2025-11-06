@@ -49,9 +49,11 @@ render_upload_component(
     load_collections_func= chromadb_service.get_collections,
     create_collection_func= chromadb_service.create_collection,
     upload_endpoint=f"{CHROMADB_API}/documents/upload-and-process",
-    job_status_endpoint=f"{CHROMADB_API}/jobs/{{job_id}}", 
+    job_status_endpoint=f"{CHROMADB_API}/jobs/{{job_id}}",
     key_prefix="files_upload"
 )
+
+st.divider()
 
 # ---- QUERY DOCUMENTS ----
 with st.expander("Query Documents"):

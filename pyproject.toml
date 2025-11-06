@@ -53,6 +53,7 @@ markdown = "^3.8.2"
 readability = "^0.3.2"
 plotly = "^6.3.0"
 tiktoken = "^0.8.0"
+pypandoc = "^1.13"
 
 
 [build-system]

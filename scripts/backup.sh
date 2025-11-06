@@ -42,10 +42,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h         Show this help message"
             echo ""
             echo "Docker Volumes Backed Up:"
-            echo "  • litigation_genai_postgres_data  (PostgreSQL database)"
-            echo "  • litigation_genai_chroma_data    (ChromaDB vectors)"
-            echo "  • litigation_genai_redis_data     (Redis cache)"
-            echo "  • litigation_genai_hf_cache       (with --include-models)"
+            echo "  • genai_postgres_data  (PostgreSQL database)"
+            echo "  • genai_chroma_data    (ChromaDB vectors)"
+            echo "  • genai_redis_data     (Redis cache)"
+            echo "  • genai_hf_cache       (with --include-models)"
             exit 0
             ;;
         *)
@@ -127,12 +127,12 @@ echo ""
 # Backup HuggingFace cache (optional, can be large)
 echo "[5/7] Backing up HuggingFace model cache..."
 if [ "$INCLUDE_HF_CACHE" = true ]; then
-    if docker volume inspect litigation_genai_hf_cache > /dev/null 2>&1; then
+    if docker volume inspect genai_hf_cache > /dev/null 2>&1; then
         HF_BACKUP="$BACKUP_DIR/huggingface_cache"
 
         # Copy from volume using temporary container
         docker run --rm \
-            -v litigation_genai_hf_cache:/source \
+            -v genai_hf_cache:/source \
             -v "$PWD/$HF_BACKUP":/backup \
             alpine sh -c "cp -r /source/. /backup/" 2>/dev/null
 
@@ -191,10 +191,10 @@ User: $(whoami)
 
 Docker Volumes Backed Up:
 -------------------------
-✓ litigation_genai_postgres_data  (PostgreSQL)
-✓ litigation_genai_chroma_data    (ChromaDB)
-✓ litigation_genai_redis_data     (Redis)
-$(if [ "$INCLUDE_HF_CACHE" = true ]; then echo "✓ litigation_genai_hf_cache       (HuggingFace)"; else echo "✗ litigation_genai_hf_cache       (not included)"; fi)
+✓ genai_postgres_data  (PostgreSQL)
+✓ genai_chroma_data    (ChromaDB)
+✓ genai_redis_data     (Redis)
+$(if [ "$INCLUDE_HF_CACHE" = true ]; then echo "✓ genai_hf_cache       (HuggingFace)"; else echo "✗ genai_hf_cache       (not included)"; fi)
 
 Docker Containers Status:
 ------------------------

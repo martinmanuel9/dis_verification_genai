@@ -91,6 +91,3 @@ class ComplianceAgent(Base):
     memory_enabled = Column(Boolean, default=False)
     tools_enabled = Column(JSON)
 
-    # Relationships (will be configured after all models are defined)
-    # sequences = relationship("ComplianceSequence", ...)
-    # debate_sessions = relationship("DebateSession", ...)

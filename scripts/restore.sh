@@ -149,12 +149,12 @@ if check_backup_item "chromadb_data" "directory"; then
     # Convert to absolute path for docker run
     BACKUP_ABS_PATH="$(cd "$BACKUP_DIR" && pwd)/chromadb_data"
 
-    docker volume rm litigation_genai_chroma_data 2>/dev/null || true
-    docker volume create litigation_genai_chroma_data > /dev/null
+    docker volume rm genai_chroma_data 2>/dev/null || true
+    docker volume create genai_chroma_data > /dev/null
 
     # FIXED: Use /chroma/chroma as destination (matching docker-compose.yml)
     if docker run --rm \
-        -v litigation_genai_chroma_data:/chroma/chroma \
+        -v genai_chroma_data:/chroma/chroma \
         -v "$BACKUP_ABS_PATH":/backup \
         alpine sh -c "cp -r /backup/. /chroma/chroma/" > /dev/null 2>&1; then
         echo "✓ ChromaDB restored successfully"
@@ -172,11 +172,11 @@ echo "[4/7] Restoring Redis cache..."
 if check_backup_item "redis_data" "directory"; then
     BACKUP_ABS_PATH="$(cd "$BACKUP_DIR" && pwd)/redis_data"
 
-    docker volume rm litigation_genai_redis_data 2>/dev/null || true
-    docker volume create litigation_genai_redis_data > /dev/null
+    docker volume rm genai_redis_data 2>/dev/null || true
+    docker volume create genai_redis_data > /dev/null
 
     if docker run --rm \
-        -v litigation_genai_redis_data:/data \
+        -v genai_redis_data:/data \
         -v "$BACKUP_ABS_PATH":/backup \
         alpine sh -c "cp -r /backup/. /data/" > /dev/null 2>&1; then
         echo "✓ Redis restored successfully"

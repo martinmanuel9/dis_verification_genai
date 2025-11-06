@@ -3,6 +3,7 @@ import time
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
+from services.llm_invoker import LLMInvoker
 from config.model_registry import (
     list_supported_models,
 )
@@ -120,19 +121,17 @@ class LLMService:
         Direct query to LLM without RAG retrieval.
         Used for test plan generation where we analyze section content directly.
         """
-        llm = self.get_llm_service(model_name)
-        
         start_time = time.time()
-        
-        # For direct queries, we use the LLM without retrieval
-        result = llm.invoke(query)
+
+        # Use LLMInvoker for clean invocation
+        content = LLMInvoker.invoke(model_name=model_name, prompt=query)
         response_time_ms = int((time.time() - start_time) * 1000)
-        
+
         # Save to chat history if session_id provided
         if session_id and log_history:
             history = ChatHistory(
                 user_query=query[:500],  # Truncate long queries
-                response=result.content[:1000] if hasattr(result, 'content') else str(result)[:1000],
+                response=content[:1000],
                 model_used=model_name,
                 collection_name="direct_query",  # Use placeholder since it's required
                 query_type="direct",
@@ -162,8 +161,6 @@ class LLMService:
                 finally:
                     session.close()
 
-        # Return just the content, maintaining compatibility with existing code
-        content = result.content if hasattr(result, 'content') else str(result)
         return content, response_time_ms
 
     def health_check(self):

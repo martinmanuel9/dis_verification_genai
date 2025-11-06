@@ -1,9 +1,3 @@
-"""
-Chat Repository
-
-This module provides data access layer for ChatHistory operations.
-Handles chat message storage and history retrieval.
-"""
 
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func

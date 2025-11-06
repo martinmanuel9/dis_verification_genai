@@ -12,6 +12,7 @@ from components.direct_chat import Direct_Chat
 from components.agent_sim import Agent_Sim
 from components.ai_agent import AI_Agent
 from components.document_generator import Document_Generator
+from components.test_card_viewer import TestCardViewer
 from components.rag_assessment import rag_assessment_dashboard
 from components.session_history import Session_History
 
@@ -56,7 +57,7 @@ Healthcheck_Sidebar()
 # Chat mode selection
 chat_mode = st.radio(
     "Select Mode:",
-    ["Direct Chat", "AI Agent Simulation", "AI Agents", "Document Generator", "RAG Assessment", "Session History"],
+    ["Direct Chat", "AI Agent Simulation", "AI Agents", "Document Generator", "Test Card Viewer", "RAG Assessment", "Session History"],
     horizontal=True
 )
 
@@ -92,6 +93,13 @@ elif chat_mode == "AI Agents":
 elif chat_mode == "Document Generator":
     st.markdown("---")
     Document_Generator()
+
+# ----------------------------------------------------------------------
+# TEST CARD VIEWER MODE (Phase 3)
+# ----------------------------------------------------------------------
+elif chat_mode == "Test Card Viewer":
+    st.markdown("---")
+    TestCardViewer()
 
 # ----------------------------------------------------------------------
 # RAG ASSESSMENT MODE

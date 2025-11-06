@@ -36,9 +36,7 @@ from .position_aware_extraction import (
     add_text_anchors_to_images
 )
 from .position_aware_chunking import (
-    page_based_chunking_with_positions,
-    section_based_chunking_with_positions,
-    merge_images_with_descriptions
+    page_based_chunking_with_positions
 )
 
 logger = logging.getLogger("DOC_INGESTION_SERVICE")
@@ -51,14 +49,25 @@ VISION_CONFIG = {
             "ollama_enabled": True,
             "huggingface_enabled": True,
             "enhanced_local_enabled": True,
-            # "ollama_url": os.getenv("OLLAMA_URL", "http://ollama:11434"),
-            # "ollama_model": os.getenv("OLLAMA_VISION_MODEL", "llava"),
+            "ollama_url": os.getenv("OLLAMA_URL", "http://ollama:11434"),
+            "ollama_model": os.getenv("OLLAMA_VISION_MODEL", "llava"),
             "huggingface_model": os.getenv("HUGGINGFACE_VISION_MODEL", "Salesforce/blip-image-captioning-base")
         }
 
 # Image storage directory
-IMAGES_DIR = os.path.join(os.getcwd(), "stored_images")
-os.makedirs(IMAGES_DIR, exist_ok=True)
+IMAGES_DIR = os.getenv("IMAGES_STORAGE_DIR", os.path.join(os.getcwd(), "stored_images"))
+try:
+    os.makedirs(IMAGES_DIR, exist_ok=True)
+except PermissionError as e:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.error(f"Permission denied creating images directory at {IMAGES_DIR}: {e}")
+    logger.warning(f"Please ensure write permissions for {IMAGES_DIR} or set IMAGES_STORAGE_DIR env variable")
+    # Try to use a fallback directory in /tmp
+    import tempfile
+    IMAGES_DIR = os.path.join(tempfile.gettempdir(), "stored_images")
+    logger.info(f"Using fallback directory: {IMAGES_DIR}")
+    os.makedirs(IMAGES_DIR, exist_ok=True)
 
 _hf_processor = None
 _hf_model = None
@@ -348,7 +357,7 @@ def enhanced_local_image_analysis(image_path: str) -> str:
             
             text_like_regions = 0
             for contour in text_contours:
-                x, y, w, h = cv2.boundingRect(contour)
+                _, _, w, h = cv2.boundingRect(contour)
                 aspect_ratio = w / h if h > 0 else 0
                 if 0.1 < aspect_ratio < 10 and w > 10 and h > 5:
                     text_like_regions += 1
@@ -686,31 +695,21 @@ def extract_text_by_page(file_content: bytes, filename: str, temp_dir: str) -> L
         logger.error(f"Error extracting text by page from {filename}: {e}")
     return texts
 
-def detect_section_title_from_page_text(text: str) -> str:
-    """Heuristic to detect a section title near the top of a page."""
-    try:
-        import re
-        lines = [ln.strip() for ln in (text or "").split('\n') if ln.strip()]
-        for ln in lines[:10]:
-            if re.match(r'^\d+(\.\d+)*\.?\s+[A-Z]', ln):  # 1. SCOPE or 4.2.1 REQUIREMENTS
-                return ln
-            if ln.isupper() and 5 < len(ln) < 80 and len(ln.split()) <= 10:
-                return ln
-            if ln.startswith(('APPENDIX', 'CHAPTER', 'SECTION', 'PART')):
-                return ln
-        return ""
-    except Exception:
-        return ""
-    
-
 def use_structure_preserving_upload() -> bool:
     """Check if we should use structure-preserving upload instead of chunking"""
     return os.getenv("USE_STRUCTURE_PRESERVING_UPLOAD", "true").lower() == "true"
 
 def structure_preserving_process(content: str, images_data: List[Dict], document_name: str) -> List[Dict]:
-    """Process document while preserving its natural structure (sections, pages, etc.)"""
+    """Process document while preserving its natural structure (sections, pages, etc.)
+
+    Used when USE_STRUCTURE_PRESERVING_UPLOAD=true (default)
+    Detects and preserves:
+    - Page boundaries
+    - Section headers (numbered sections, APPENDIX, etc.)
+    - Document structure for better semantic chunking
+    """
     import re
-    
+
     chunks = []
     
     # Try to detect if this is a multi-page document
@@ -1272,15 +1271,12 @@ def run_ingest_job(
     chunk_size: int,
     chunk_overlap: int,
     store_images: bool,
-    model_name: str,
     vision_models: List[str],
     openai_api_key: Optional[str],
     enable_ocr: bool,
 ):
     # initialize a hash: status + zeroed counters
     progress_key = f"job:{job_id}:progress"
-    docs_key = f"job:{job_id}:documents"
-    # jobs[job_id] = "running"
     redis_client.set(job_id, "running")
 
     # initialize the hash strictly on the "progress" key
@@ -1551,8 +1547,8 @@ def run_ingest_job(
     # redis_client.set(job_id, "success")
     redis_client.set(job_id, "success")
 
-def extract_images_from_docx(file_content: bytes, filename: str, temp_dir: str, doc_id: str):
-    docx_path = os.path.join(temp_dir, filename)
+def extract_images_from_docx(file_content: bytes, filename: str, _temp_dir: str, doc_id: str):
+    docx_path = os.path.join(_temp_dir, filename)
     with open(docx_path, "wb") as f:
         f.write(file_content)
 
@@ -1561,7 +1557,6 @@ def extract_images_from_docx(file_content: bytes, filename: str, temp_dir: str, 
         for member in z.namelist():
             if member.startswith("word/media/"):
                 data = z.read(member)
-                ext  = Path(member).suffix
                 name = f"{doc_id}_{Path(member).name}"
                 out  = os.path.join(IMAGES_DIR, name)
                 with open(out, "wb") as imgf:
@@ -1569,8 +1564,8 @@ def extract_images_from_docx(file_content: bytes, filename: str, temp_dir: str, 
                 pages_data[0]["images"].append(out)
     return pages_data
 
-def extract_images_from_xlsx(file_content: bytes, filename: str, temp_dir: str, doc_id: str):
-    xlsx_path = os.path.join(temp_dir, filename)
+def extract_images_from_xlsx(file_content: bytes, filename: str, _temp_dir: str, doc_id: str):
+    xlsx_path = os.path.join(_temp_dir, filename)
     with open(xlsx_path, "wb") as f:
         f.write(file_content)
     
@@ -1580,7 +1575,6 @@ def extract_images_from_xlsx(file_content: bytes, filename: str, temp_dir: str, 
         for m in z.namelist():
             if m.startswith("xl/media/"):
                 data = z.read(m)
-                ext  = Path(m).suffix
                 name = f"{doc_id}_{Path(m).name}"
                 out  = os.path.join(IMAGES_DIR, name)
                 with open(out, "wb") as imgf:
@@ -1588,7 +1582,7 @@ def extract_images_from_xlsx(file_content: bytes, filename: str, temp_dir: str, 
                 pages_data[0]["images"].append(out)
     return pages_data
 
-def extract_images_from_html(html_bytes, filename, temp_dir, doc_id):
+def extract_images_from_html(html_bytes, _filename, _temp_dir, doc_id):
     html = html_bytes.decode("utf8", errors="ignore")
     soup = BeautifulSoup(html, "html.parser")
     pages = [{"page":1, "images":[], "text": soup.get_text()}]

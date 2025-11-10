@@ -39,8 +39,8 @@ def Direct_Chat():
         st.session_state.collections = fetch_collections()
 
     collections = st.session_state.collections
-    chat_tab, doc_upload_tab = st.tabs([
-        "Chat with AI", "Upload Documents"
+    chat_tab, doc_upload_tab, history_tab = st.tabs([
+        "Chat with AI", "Upload Documents", "Chat History"
     ])
 
     with chat_tab:
@@ -92,7 +92,7 @@ def Direct_Chat():
                                 key="chat_document_selector"
                             )
                             document_id = doc_options[selected_display]
-                            st.info(f"🔍 Will search within: {selected_display}")
+                            st.info(f" Will search within: {selected_display}")
                         else:
                             st.warning("No documents found in this collection.")
                     else:
@@ -124,13 +124,24 @@ def Direct_Chat():
                                 model_name=model_key_map[mode],
                                 top_k=5
                             )
-                            answer = data["response"]
+                            answer = data.get("response", "")
                             rt_ms = data.get("response_time_ms", 0)
-                            session_id = data["session_id"]
+                            session_id = data.get("session_id", "N/A")
                             formatted_citations = data.get("formatted_citations", "")
 
-                            st.success("Analysis Complete (Document-Specific):")
-                            st.markdown(answer)
+                            st.success("Analysis Complete (Document-Specific)")
+
+                            # Debug information
+                            st.info(f"Response length: {len(answer) if answer else 0} characters")
+
+                            if answer and len(answer.strip()) > 0:
+                                st.markdown("### Analysis Results")
+                                st.markdown(answer)
+                            else:
+                                st.warning("No response generated or response is empty.")
+                                st.write("**Full response data:**")
+                                st.json(data)
+
                             st.caption(f"Response time: {rt_ms/1000:.2f}s")
                             st.caption(f"Session ID: {session_id}")
                             display_citations(formatted_citations)
@@ -165,4 +176,7 @@ def Direct_Chat():
             job_status_endpoint=f"{CHROMADB_API}/jobs/{{job_id}}",
             key_prefix="eval"
         )
-        
+
+    with history_tab:
+        Chat_History(key_prefix="direct_chat")
+

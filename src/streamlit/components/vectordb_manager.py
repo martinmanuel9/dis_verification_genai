@@ -386,7 +386,7 @@ def render_document_management(key_prefix: str):
 
                         with col2:
                             st.markdown(f"**Filename**: {img.get('filename', 'N/A')}")
-                            st.markdown(f"**Exists**: {'✅' if img.get('exists', False) else '❌'}")
+                            st.markdown(f"**Exists**: {'' if img.get('exists', False) else ''}")
 
                             if img.get('description'):
                                 st.markdown("**Description**:")

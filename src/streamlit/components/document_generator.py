@@ -15,33 +15,52 @@ def Document_Generator():
     st.subheader("Generate Documents")
 
     # ----------------------------
-    # 1) Pick agents
+    # Agent Set Selection
     # ----------------------------
+    st.markdown("---")
+    st.subheader("Agent Orchestration")
+
+    # Fetch available agent sets
     try:
-        agents_response = api_client.get(f"{config.endpoints.agent}/get-agents")
-        agents = agents_response.get("agents", [])
+        agent_sets_response = api_client.get(f"{config.fastapi_url}/api/agent-sets")
+        agent_sets = agent_sets_response.get("agent_sets", [])
+        active_agent_sets = [s for s in agent_sets if s.get('is_active', True)]
     except Exception as e:
-        st.error(f"Failed to fetch agents: {e}")
-        agents = st.session_state.get("available_rule_agents", [])
+        st.warning(f"Could not load agent sets: {e}")
+        active_agent_sets = []
 
-    if not agents:
-        st.warning("No agents available. Please create agents first in the 'AI Agent' component.")
-        st.stop()
+    # Agent set selector
+    if active_agent_sets:
+        agent_set_options = [s['name'] for s in active_agent_sets]
+        selected_agent_set = st.selectbox(
+            "Select Agent Pipeline",
+            options=agent_set_options,
+            key="gen_agent_set",
+            help="Choose an agent set to define the orchestration pipeline."
+        )
 
-    agent_map = {f"{a['name']} ({a['model_name']})": a["id"] for a in agents}
-    selected_agents = st.multiselect(
-        "Select Agents",
-        list(agent_map.keys()),
-        key="gen_agents"
-    )
-
-    if not selected_agents:
-        st.info("Choose at least one agent to proceed")
+        # Show agent set details
+        agent_set = next((s for s in active_agent_sets if s['name'] == selected_agent_set), None)
+        if agent_set:
+            with st.expander("View Agent Set Configuration"):
+                st.write(f"**Description:** {agent_set.get('description', 'No description')}")
+                st.write(f"**Type:** {agent_set.get('set_type', 'sequence')}")
+                st.write(f"**Usage Count:** {agent_set.get('usage_count', 0)}")
+                st.write("**Pipeline Stages:**")
+                for idx, stage in enumerate(agent_set.get('set_config', {}).get('stages', []), 1):
+                    st.write(f"  {idx}. **{stage.get('stage_name')}** - {len(stage.get('agent_ids', []))} agent(s) ({stage.get('execution_mode')})")
+                    if stage.get('description'):
+                        st.caption(f"     {stage.get('description')}")
+    else:
+        st.error("No agent sets available. Please create an agent set in the Agent Set Manager.")
         st.stop()
 
     # ----------------------------
-    # 2) Get collections
+    # 2) Select source documents
     # ----------------------------
+    st.markdown("---")
+    st.subheader("Source Documents")
+
     if "collections" not in st.session_state:
         st.session_state.collections = chromadb_service.get_collections()
 
@@ -51,44 +70,9 @@ def Document_Generator():
         st.warning("No collections available. Please upload documents first.")
         st.stop()
 
-    # ----------------------------
-    # 2a) Pick TEMPLATE collection & load template docs
-    # ----------------------------
-    template_collection = st.selectbox(
-        "Template Collection (the one you uploaded as templates)",
-        collections,
-        key="gen_template_coll",
-    )
-
-    if st.button("Load Template Library", key="gen_load_templates"):
-        with st.spinner("Loading templates..."):
-            try:
-                documents = chromadb_service.get_documents(template_collection)
-                st.session_state.template_docs = [
-                    {
-                        'document_id': doc.document_id,
-                        'document_name': doc.document_name
-                    }
-                    for doc in documents
-                ]
-                st.success(f"Loaded {len(documents)} templates")
-            except Exception as e:
-                st.error(f"Failed to load templates: {e}")
-
-    template_docs = st.session_state.get("template_docs", [])
-    template_map = {d["document_name"]: d["document_id"] for d in template_docs}
-    selected_templates = st.multiselect(
-        "Select Template(s)",
-        list(template_map.keys()),
-        key="gen_templates"
-    )
-    template_doc_ids = [template_map[name] for name in selected_templates]
-
-    # ----------------------------
-    # 2b) Pick SOURCE collection & load source docs
-    # ----------------------------
+    # Pick collection & load source docs
     source_collection = st.selectbox(
-        "Source Collection (your requirements/standards)",
+        "Select Collection",
         collections,
         key="gen_source_coll",
     )
@@ -118,12 +102,7 @@ def Document_Generator():
     source_doc_ids = [source_map[name] for name in selected_sources]
 
     # ----------------------------
-    # 3) Get agent IDs
-    # ----------------------------
-    agent_ids = [agent_map[label] for label in selected_agents]
-
-    # ----------------------------
-    # 4) Let user name the output file
+    # 3) Let user name the output file
     # ----------------------------
     out_name = st.text_input(
         "Output file name (no extension):",
@@ -132,10 +111,10 @@ def Document_Generator():
     ).strip()
 
     # ----------------------------
-    # 4b) Test Card & Export Options (Phase 3 Enhancement)
+    # 4) Test Card & Export Options
     # ----------------------------
     st.markdown("---")
-    st.subheader("📋 Test Card & Export Options")
+    st.subheader("Test Card & Export Options")
 
     col1, col2 = st.columns(2)
 
@@ -180,34 +159,36 @@ def Document_Generator():
     st.markdown("---")
 
     # ----------------------------
-    # 5) Generate analyses
+    # 5) Generate document
     # ----------------------------
     if st.button("Generate Documents", type="primary", key="generate_docs_main"):
-        if not template_doc_ids or not source_doc_ids:
-            st.error("You must select at least one template and one source document.")
+        if not source_doc_ids:
+            st.error("You must select at least one source document.")
         else:
             payload = {
-                "template_collection": template_collection,
-                "template_doc_ids": template_doc_ids,
                 "source_collections": [source_collection],
                 "source_doc_ids": source_doc_ids,
-                "agent_ids": agent_ids,
                 "use_rag": True,
                 "top_k": 5,
                 "doc_title": out_name,
-                # Phase 3 enhancements
                 "include_test_cards": include_test_cards,
                 "export_format": "pandoc" if "Pandoc" in export_method else "python-docx",
                 "include_toc": include_toc,
                 "number_sections": number_sections
             }
 
-            with st.spinner("Generating documents... (This may take a few minutes)"):
+            # Add agent_set_id
+            agent_set = next((s for s in active_agent_sets if s['name'] == selected_agent_set), None)
+            if agent_set:
+                payload["agent_set_id"] = agent_set['id']
+                st.info(f"Using agent set: **{selected_agent_set}**")
+
+            with st.spinner("Generating documents... (This may take 5-15 minutes depending on document size)"):
                 try:
                     response = api_client.post(
                         f"{config.endpoints.doc_gen}/generate_documents",
                         data=payload,
-                        timeout=600  # Increased timeout for test card generation
+                        timeout=1200  # 20 minutes - sufficient for large documents with multiple agents
                     )
 
                     docs = response.get("documents", [])
@@ -254,18 +235,18 @@ def Document_Generator():
 
     # Info section with Phase 3 tips
     st.markdown("---")
-    with st.expander("ℹ️ Tips & Information"):
+    with st.expander("Tips & Information"):
         st.markdown("""
         ### Document Generation Tips
 
         **Test Card Options:**
-        - ✅ **Include Test Cards**: Automatically generates executable test checklists for each section
-        - 📝 Test cards include: Test ID, procedures, expected results, and acceptance criteria
-        - 🔄 After generation, view detailed test cards in the **Test Card Viewer** page
+        - **Include Test Cards**: Automatically generates executable test checklists for each section
+        - Test cards include: Test ID, procedures, expected results, and acceptance criteria
+        - After generation, view detailed test cards in the **Test Card Viewer** page
 
         **Export Methods:**
-        - 📄 **Standard (python-docx)**: Basic Word document formatting
-        - 🎨 **Professional (Pandoc)**: Enhanced formatting with:
+        - **Standard (python-docx)**: Basic Word document formatting
+        - **Professional (Pandoc)**: Enhanced formatting with:
           - Auto-generated Table of Contents
           - Automatic section numbering
           - Professional typography

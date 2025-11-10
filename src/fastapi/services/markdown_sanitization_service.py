@@ -32,7 +32,7 @@ class MarkdownSanitizationService:
             return ""
 
         # Replace common emoji bullets with hyphen bullets
-        md = md.replace("🔹 ", "- ")
+        md = md.replace(" ", "- ")
         md = md.replace("• ", "- ")
         md = md.replace("– ", "- ")
         md = md.replace("● ", "- ")

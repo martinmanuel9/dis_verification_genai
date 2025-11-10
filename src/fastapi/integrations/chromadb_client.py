@@ -43,9 +43,9 @@ class ChromaDBClient:
             )
             # Test connection
             self._client.heartbeat()
-            print(f"✓ ChromaDB connected at {self.host}:{self.port}")
+            print(f" ChromaDB connected at {self.host}:{self.port}")
         except Exception as e:
-            print(f"✗ ChromaDB connection failed: {e}")
+            print(f" ChromaDB connection failed: {e}")
             raise ChromaDBException(f"Failed to connect to ChromaDB at {self.host}:{self.port}") from e
 
     @property

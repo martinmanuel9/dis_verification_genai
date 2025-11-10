@@ -38,9 +38,9 @@ class RedisClient:
             self._client = redis.from_url(self.redis_url, decode_responses=True)
             # Test connection
             self._client.ping()
-            print(f"✓ Redis connected at {self.redis_url}")
+            print(f" Redis connected at {self.redis_url}")
         except Exception as e:
-            print(f"✗ Redis connection failed: {e}")
+            print(f" Redis connection failed: {e}")
             raise RedisException(f"Failed to connect to Redis at {self.redis_url}") from e
 
     @property

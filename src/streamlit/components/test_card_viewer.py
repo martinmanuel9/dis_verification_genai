@@ -103,9 +103,9 @@ def create_test_card_docx(test_cards_data, metadata, doc_title):
                     row_cells[5].text = ', '.join(deps) if deps else 'None'
 
                     # Execution tracking columns (checkboxes)
-                    row_cells[6].text = '☐'
-                    row_cells[7].text = '☐'
-                    row_cells[8].text = '☐'
+                    row_cells[6].text = ''
+                    row_cells[7].text = ''
+                    row_cells[8].text = ''
                     row_cells[9].text = ''
 
                     # Set font size for all cells in row
@@ -138,10 +138,24 @@ def create_test_card_docx(test_cards_data, metadata, doc_title):
 
 def TestCardViewer():
     """
-    Component for viewing and managing test cards generated from uploaded documents.
-    Creates test cards directly from specifications/standards in the vector database.
+    Component for viewing and managing test cards and generated test plans.
+    Two modes: Generate new test cards OR view previously generated test plans.
     """
-    st.header("Test Card Generator")
+    st.header("Test Cards & Generated Plans")
+
+    # Tabs for different functionality
+    tab1, tab2 = st.tabs(["Generate Test Cards", "View Generated Test Plans"])
+
+    with tab1:
+        render_test_card_generator()
+
+    with tab2:
+        render_generated_plans_viewer()
+
+
+def render_test_card_generator():
+    """Generate test cards from specification documents"""
+    st.subheader("Generate Test Cards")
     st.info("Generate executable test cards from uploaded specification documents (MIL-STD, ISO, etc.)")
 
     # Get available collections
@@ -152,10 +166,7 @@ def TestCardViewer():
 
     if not collections:
         st.warning("No collections found. Please upload documents first in the Upload Documents page.")
-        st.stop()
-
-    # Document selection
-    st.subheader("Select Source Documents")
+        return
 
     # Collection selection
     selected_collection = st.selectbox(
@@ -253,10 +264,10 @@ def TestCardViewer():
                     st.error("No test plan generated. Please check your documents.")
                     st.stop()
 
-                st.success("✅ Step 1/2: Test plan generated successfully!")
+                st.success(" Step 1/2: Test plan generated successfully!")
 
             except Exception as e:
-                st.error(f"❌ Failed to generate test plan: {e}")
+                st.error(f" Failed to generate test plan: {e}")
                 import traceback
                 st.code(traceback.format_exc())
                 st.stop()
@@ -297,10 +308,10 @@ def TestCardViewer():
                     "doc_title": doc_title
                 }
 
-                st.success(f"✅ Step 2/2: Generated {len(test_cards)} test card sections!")
+                st.success(f" Step 2/2: Generated {len(test_cards)} test card sections!")
 
             except Exception as e:
-                st.error(f"❌ Failed to generate test cards: {e}")
+                st.error(f" Failed to generate test cards: {e}")
                 import traceback
                 st.code(traceback.format_exc())
                 st.session_state.test_cards = {}
@@ -449,7 +460,7 @@ def TestCardViewer():
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             key="download_docx_all"
                         )
-                        st.success(f"✅ Word document ready: test_cards_{timestamp}.docx")
+                        st.success(f" Word document ready: test_cards_{timestamp}.docx")
 
                     else:  # Excel (CSV)
                         # Combine all test cards into single CSV
@@ -476,17 +487,17 @@ def TestCardViewer():
                                 mime="text/csv",
                                 key="download_csv_all"
                             )
-                            st.success(f"✅ CSV export ready: {len(all_cards)} test cards")
+                            st.success(f" CSV export ready: {len(all_cards)} test cards")
                         else:
                             st.warning("No test cards available to export")
 
                 except Exception as e:
-                    st.error(f"❌ Export failed: {e}")
+                    st.error(f" Export failed: {e}")
                     import traceback
                     st.code(traceback.format_exc())
 
     else:
-        st.info("👆 Click 'Generate Test Plan & Cards' to generate test cards from the selected documents")
+        st.info(" Click 'Generate Test Plan & Cards' to generate test cards from the selected documents")
 
     # Help section
     with st.expander("Help & Information"):
@@ -531,3 +542,106 @@ def TestCardViewer():
         - Use **CSV** format for test execution tracking in spreadsheet applications
         - Test cards are generated directly from your uploaded specification documents
         """)
+
+
+def render_generated_plans_viewer():
+    """View and download previously generated test plans"""
+    st.subheader("Generated Test Plans")
+    st.info("Browse and download test plans generated via Document Generator")
+
+    try:
+        # Fetch documents from generated_test_plan collection
+        response = api_client.get(
+            f"{config.fastapi_url}/api/vectordb/documents?collection_name=generated_test_plan",
+            timeout=10
+        )
+
+        doc_ids = response.get("ids", [])
+        metadatas = response.get("metadatas", [])
+        documents = response.get("documents", [])
+
+        if not doc_ids:
+            st.info("No generated test plans found. Generate test plans using the Document Generator.")
+            return
+
+        st.success(f"Found {len(doc_ids)} generated test plan(s)")
+
+        # Create dataframe for display
+        plans_data = []
+        for doc_id, metadata in zip(doc_ids, metadatas):
+            plans_data.append({
+                "Document ID": doc_id,
+                "Title": metadata.get("title", "N/A"),
+                "Generated": metadata.get("generated_at", "N/A"),
+                "Sections": metadata.get("total_sections", 0),
+                "Requirements": metadata.get("total_requirements", 0),
+                "Test Procedures": metadata.get("total_test_procedures", 0),
+                "Words": metadata.get("word_count", 0),
+                "Status": metadata.get("processing_status", "N/A")
+            })
+
+        df = pd.DataFrame(plans_data)
+        st.dataframe(df, hide_index=True, use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("View Test Plan")
+
+        # Select a plan to view
+        plan_options = {
+            f"{m.get('title', 'Unknown')} - {m.get('generated_at', 'N/A')}": doc_id
+            for doc_id, m in zip(doc_ids, metadatas)
+        }
+
+        selected_plan = st.selectbox(
+            "Select a test plan to view:",
+            list(plan_options.keys()),
+            key="selected_plan"
+        )
+
+        if selected_plan:
+            selected_doc_id = plan_options[selected_plan]
+            selected_metadata = next(m for doc_id, m in zip(doc_ids, metadatas) if doc_id == selected_doc_id)
+            selected_content = next(doc for doc_id, doc in zip(doc_ids, documents) if doc_id == selected_doc_id)
+
+            # Display metadata
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Sections", selected_metadata.get("total_sections", 0))
+            with col2:
+                st.metric("Requirements", selected_metadata.get("total_requirements", 0))
+            with col3:
+                st.metric("Test Procedures", selected_metadata.get("total_test_procedures", 0))
+            with col4:
+                st.metric("Word Count", selected_metadata.get("word_count", 0))
+
+            # Display content
+            st.markdown("---")
+            st.subheader("Test Plan Content")
+
+            # Show in expandable sections
+            with st.expander("View Full Test Plan", expanded=True):
+                st.markdown(selected_content)
+
+            # Download button
+            st.markdown("---")
+            st.subheader("Download")
+
+            # Create downloadable markdown file
+            download_data = f"# {selected_metadata.get('title', 'Test Plan')}\n\n"
+            download_data += f"**Generated:** {selected_metadata.get('generated_at', 'N/A')}\n\n"
+            download_data += f"**Sections:** {selected_metadata.get('total_sections', 0)} | "
+            download_data += f"**Requirements:** {selected_metadata.get('total_requirements', 0)} | "
+            download_data += f"**Test Procedures:** {selected_metadata.get('total_test_procedures', 0)}\n\n"
+            download_data += "---\n\n"
+            download_data += selected_content
+
+            st.download_button(
+                label="Download as Markdown",
+                data=download_data,
+                file_name=f"{selected_metadata.get('title', 'test_plan')}.md",
+                mime="text/markdown",
+                key="download_md"
+            )
+
+    except Exception as e:
+        st.error(f"Failed to load generated test plans: {e}")

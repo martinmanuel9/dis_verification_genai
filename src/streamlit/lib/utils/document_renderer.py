@@ -87,7 +87,7 @@ def render_reconstructed_document(result: dict):
 
                 except Exception as e:
                     # Show placeholder if image can't be fetched
-                    st.warning(f"⚠️ Image not available: {filename}")
+                    st.warning(f" Image not available: {filename}")
                     st.caption(f"Alt text: {clean_alt}")
 
                 i += 2

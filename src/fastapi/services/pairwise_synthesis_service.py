@@ -119,9 +119,9 @@ class PairwiseSynthesisService:
                     try:
                         combined_content = future.result()
                         pairwise_results[s1] = combined_content
-                        logger.info(f"✅ [{completed}/{total}] Synthesized pair: {s1} + {s2}")
+                        logger.info(f" [{completed}/{total}] Synthesized pair: {s1} + {s2}")
                     except Exception as e:
-                        logger.error(f"❌ [{completed}/{total}] Failed to synthesize {s1} + {s2}: {e}")
+                        logger.error(f" [{completed}/{total}] Failed to synthesize {s1} + {s2}: {e}")
                         # Fallback: keep original first section
                         pairwise_results[s1] = sections.get(s1, "")
 
@@ -210,9 +210,9 @@ class PairwiseSynthesisService:
                     try:
                         combined_content = future.result()
                         pairwise_results[s1] = combined_content
-                        logger.info(f"✅ [{completed}/{total}] Synthesized consecutive: {s1} + {s2}")
+                        logger.info(f" [{completed}/{total}] Synthesized consecutive: {s1} + {s2}")
                     except Exception as e:
-                        logger.error(f"❌ [{completed}/{total}] Failed to synthesize {s1} + {s2}: {e}")
+                        logger.error(f" [{completed}/{total}] Failed to synthesize {s1} + {s2}: {e}")
                         # Fallback: keep original first section
                         pairwise_results[s1] = sections.get(s1, "")
 

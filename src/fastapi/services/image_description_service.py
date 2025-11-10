@@ -184,18 +184,18 @@ class ImageDescriptionService:
 
                         page_descriptions[page_num].append(description)
                         logger.info(
-                            f"✅ [{completed}/{total}] Described image: "
+                            f" [{completed}/{total}] Described image: "
                             f"page {page_num}, {img.image_type}"
                         )
                     else:
                         logger.warning(
-                            f"⚠️  [{completed}/{total}] No description generated: "
+                            f"  [{completed}/{total}] No description generated: "
                             f"page {page_num}, {img.image_type}"
                         )
 
                 except Exception as e:
                     logger.error(
-                        f"❌ [{completed}/{total}] Failed to describe image "
+                        f" [{completed}/{total}] Failed to describe image "
                         f"on page {page_num}: {e}"
                     )
 

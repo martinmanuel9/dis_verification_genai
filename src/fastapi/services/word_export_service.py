@@ -443,7 +443,7 @@ class WordExportService:
                     # Try to add the image
                     try:
                         image_path = os.path.join(IMAGES_DIR, filename)
-                        logger.info(f"✅ Inserting image {idx+1}/{len(image_data)}: {filename}")
+                        logger.info(f" Inserting image {idx+1}/{len(image_data)}: {filename}")
 
                         if os.path.exists(image_path):
                             doc.add_picture(image_path, width=Inches(5.5))
@@ -453,11 +453,11 @@ class WordExportService:
                                 para = doc.add_paragraph(alt_text)
                                 para.style = 'Intense Quote'
                         else:
-                            logger.warning(f"❌ Image not found at path: {image_path}")
+                            logger.warning(f" Image not found at path: {image_path}")
                             doc.add_paragraph(f"[Image: {alt_text or filename}]")
                             images_failed += 1
                     except Exception as e:
-                        logger.error(f"❌ Failed to insert image {filename}: {e}")
+                        logger.error(f" Failed to insert image {filename}: {e}")
                         doc.add_paragraph(f"[Image: {alt_text or filename}]")
                         images_failed += 1
 

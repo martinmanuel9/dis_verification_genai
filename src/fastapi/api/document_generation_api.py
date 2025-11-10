@@ -51,6 +51,7 @@ class GenerateRequest(BaseModel):
     critic_batch_char_cap: Optional[int]        = 8000
     sectioning_strategy:  Optional[str]         = "auto"   # auto | by_chunks | by_metadata | by_pages
     chunks_per_section:   Optional[int]         = 5
+    agent_set_id:         int                   = None  # Required agent set for orchestration
 
 @doc_gen_api_router.post("/generate_documents")
 async def generate_documents(
@@ -64,7 +65,8 @@ async def generate_documents(
         doc_service.generate_test_plan,
         req.source_collections,
         req.source_doc_ids,
-        req.doc_title
+        req.doc_title,
+        req.agent_set_id
     )
     return {"documents": docs}
 
@@ -75,6 +77,7 @@ class OptimizedTestPlanRequest(BaseModel):
     max_workers:          Optional[int]         = 4
     sectioning_strategy:  Optional[str]         = "auto"
     chunks_per_section:   Optional[int]         = 5
+    agent_set_id:         int                   = None  # Required agent set for orchestration
 
 @doc_gen_api_router.post("/generate_optimized_test_plan")
 async def generate_optimized_test_plan(
@@ -95,7 +98,8 @@ async def generate_optimized_test_plan(
             doc_service.generate_test_plan,
             req.source_collections,
             req.source_doc_ids,
-            req.doc_title
+            req.doc_title,
+            req.agent_set_id
         )
         return {"documents": docs}
     except Exception as e:

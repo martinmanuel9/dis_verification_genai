@@ -206,9 +206,9 @@ try:
         port=CHROMA_PORT
     )
     heartbeat = chroma_client.heartbeat()
-    print(f"✓ ChromaDB connected at {CHROMA_HOST}:{CHROMA_PORT}: {heartbeat}")
+    print(f" ChromaDB connected at {CHROMA_HOST}:{CHROMA_PORT}: {heartbeat}")
 except Exception as e:
-    print(f"✗ ChromaDB connection failed: {e}")
+    print(f" ChromaDB connection failed: {e}")
     chroma_client = None
 
 Base = declarative_base()

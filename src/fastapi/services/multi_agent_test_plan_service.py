@@ -26,8 +26,16 @@ import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import asyncio
+from string import Formatter
+
+# Import LLMInvoker for direct invocation with system prompt support
+from services.llm_invoker import LLMInvoker
 
 from services.llm_service import LLMService
+from config.agent_registry import get_agent_registry
+from repositories.agent_set_repository import AgentSetRepository
+from repositories.test_plan_agent_repository import TestPlanAgentRepository
+from core.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -68,32 +76,29 @@ class MultiAgentTestPlanService:
         self.chroma_url = chroma_url.rstrip("/")
         # Use FastAPI URL for vectordb endpoints if provided, otherwise fall back to chroma_url
         self.fastapi_url = (fastapi_url or chroma_url).rstrip("/")
-        
+
         # Redis setup for pipeline
         redis_host = os.getenv("REDIS_HOST", "redis")
         redis_port = int(os.getenv("REDIS_PORT", 6379))
         self.redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
-        
-        # Agent configuration using GPT-4 (scalable via env)
-        # Configure actors by comma-separated ACTOR_MODELS (e.g., "gpt-4,gpt-4o-mini")
-        # or by ACTOR_AGENT_COUNT (repeats "gpt-4" N times). Defaults to 3 GPT-4 actors.
-        actor_models_env = os.getenv("ACTOR_MODELS")
-        if actor_models_env:
-            self.actor_models = [m.strip() for m in actor_models_env.split(",") if m.strip()]
-        else:
-            try:
-                count = int(os.getenv("ACTOR_AGENT_COUNT", "3"))
-            except ValueError:
-                count = 3
-            base_model = os.getenv("ACTOR_BASE_MODEL", "gpt-4")
-            self.actor_models = [base_model for _ in range(max(1, count))]
 
-        self.critic_model = os.getenv("CRITIC_MODEL", "gpt-4")
-        self.final_critic_model = os.getenv("FINAL_CRITIC_MODEL", self.critic_model)
+        # ===== AGENT REGISTRY INTEGRATION =====
+        # Load agent configuration from database-backed registry
+        # This provides database-first loading with ENV var overrides
+        self.agent_registry = get_agent_registry()
+
+        # Get agent models from registry (already loaded from DB or hardcoded defaults)
+        self.actor_models = self.agent_registry.actor_models
+        self.critic_model = self.agent_registry.critic_model
+        self.final_critic_model = self.agent_registry.final_critic_model
 
         # Keep originals for potential fallback logging
         self._original_actor_models = list(self.actor_models)
         self._original_critic_model = self.critic_model
+
+        # Log source of agent configuration
+        db_source = "database" if self.agent_registry.is_using_database() else "hardcoded/ENV"
+        logger.info(f"Agents loaded from: {db_source}")
 
         # Pipeline retention (seconds). Keep progress so UI can re-open later.
         try:
@@ -111,20 +116,272 @@ class MultiAgentTestPlanService:
             logger.info("Redis connection successful")
         except Exception as e:
             logger.error(f"Redis connection failed: {e}")
-    
-    def generate_multi_agent_test_plan(self, 
-                                     source_collections: List[str], 
+
+    def _load_agent_set_configuration(self, agent_set_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Load agent set configuration from database
+
+        Args:
+            agent_set_id: ID of the agent set to load
+
+        Returns:
+            Agent set configuration dict or None if not found/error
+        """
+        db = None
+        try:
+            # Get database session
+            db = next(get_db())
+            repo = AgentSetRepository()
+
+            # Load agent set
+            agent_set = repo.get_by_id(agent_set_id, db)
+
+            if not agent_set:
+                logger.error(f"Agent set ID {agent_set_id} not found")
+                return None
+
+            if not agent_set.is_active:
+                logger.warning(f"Agent set ID {agent_set_id} is inactive, using anyway")
+
+            logger.info(f"Loaded agent set: {agent_set.name} (ID: {agent_set_id})")
+            logger.info(f"Set type: {agent_set.set_type}, Stages: {len(agent_set.set_config.get('stages', []))}")
+
+            # Increment usage count
+            repo.increment_usage_count(agent_set_id, db)
+
+            return agent_set.set_config
+
+        except Exception as e:
+            logger.error(f"Failed to load agent set configuration: {e}")
+            return None
+        finally:
+            # CRITICAL: Close database session to prevent connection pool exhaustion
+            if db is not None:
+                db.close()
+
+    def _execute_agent_by_id(self, agent_id: int, section_title: str, section_content: str, context_vars: Dict[str, str] = None) -> Optional[ActorResult]:
+        """
+        Execute a single agent by database ID
+
+        Args:
+            agent_id: Database ID of the agent to execute
+            section_title: Section title for context
+            section_content: Section content to process
+            context_vars: Dictionary of context variables for prompt formatting
+
+        Returns:
+            ActorResult with agent's output or None if failed
+        """
+        db = None
+        try:
+            # Load agent from database
+            db = next(get_db())
+            repo = TestPlanAgentRepository()
+            agent = repo.get_by_id(agent_id, db)
+
+            if not agent:
+                logger.error(f"Agent ID {agent_id} not found in database")
+                return None
+
+            if not agent.is_active:
+                logger.warning(f"Agent ID {agent_id} ({agent.name}) is inactive, skipping")
+                return None
+
+            # Copy agent data to avoid using it after session close
+            agent_name = agent.name
+            agent_type = agent.agent_type
+            agent_model_name = agent.model_name
+            agent_system_prompt = agent.system_prompt
+            agent_user_prompt_template = agent.user_prompt_template
+            agent_temperature = agent.temperature
+            agent_max_tokens = agent.max_tokens
+
+            # Close database session BEFORE making LLM call (which can take a long time)
+            db.close()
+            db = None
+
+            start_time = time.time()
+
+            # Prepare prompt based on agent's template
+            # Build format variables with defaults
+            format_vars = {
+                'section_title': section_title,
+                'section_content': section_content,
+                'context': context_vars.get('context', '') if context_vars else '',
+                'actor_outputs': context_vars.get('actor_outputs', '') if context_vars else '',
+                'critic_output': context_vars.get('critic_output', '') if context_vars else '',
+                'actor_outputs_summary': context_vars.get('actor_outputs_summary', '') if context_vars else '',
+                'synthesized_rules': context_vars.get('synthesized_rules', '') if context_vars else '',
+                'previous_sections_summary': context_vars.get('previous_sections_summary', '') if context_vars else '',
+            }
+
+            logger.debug(f"Agent {agent_id} template variables available: {list(format_vars.keys())}")
+            logger.debug(f"Agent {agent_id} context_vars keys: {list(context_vars.keys()) if context_vars else 'None'}")
+
+            # Use simple string replacement instead of .format() to avoid issues with JSON in templates
+            # Templates may contain JSON examples with curly braces that conflict with .format()
+            user_prompt = agent_user_prompt_template
+            for key, value in format_vars.items():
+                # Replace {key} with the actual value
+                user_prompt = user_prompt.replace(f'{{{key}}}', str(value))
+
+            # Execute agent via LLM service
+            logger.info(f"Executing agent: {agent_name} (ID: {agent_id}, Type: {agent_type}, Model: {agent_model_name})")
+
+            
+
+            response = LLMInvoker.invoke(
+                model_name=agent_model_name,
+                prompt=user_prompt,
+                system_prompt=agent_system_prompt,
+                temperature=agent_temperature,
+                max_tokens=agent_max_tokens
+            )
+
+            processing_time = time.time() - start_time
+
+            # Return as ActorResult for compatibility
+            # LLMInvoker.invoke() returns a string directly
+            return ActorResult(
+                agent_id=f"agent_{agent_id}_{uuid.uuid4().hex[:8]}",
+                model_name=agent_model_name,
+                section_title=section_title,
+                rules_extracted=response,  # Already a string from LLMInvoker
+                processing_time=processing_time
+            )
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Failed to execute agent ID {agent_id}: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+        finally:
+            # CRITICAL: Close database session to prevent connection pool exhaustion
+            if db is not None:
+                db.close()
+
+    def _execute_stage(self, stage: Dict[str, Any], section_title: str, section_content: str, all_stage_outputs: Dict[str, List[ActorResult]] = None) -> List[ActorResult]:
+        """
+        Execute a single stage from agent set configuration
+
+        Args:
+            stage: Stage configuration dict with agent_ids, execution_mode, etc.
+            section_title: Section title for context
+            section_content: Section content to process
+            all_stage_outputs: Dictionary mapping stage names to their outputs (for building context)
+
+        Returns:
+            List of ActorResult from this stage
+        """
+        agent_ids = stage.get('agent_ids', [])
+        execution_mode = stage.get('execution_mode', 'parallel')
+        stage_name = stage.get('stage_name', 'unnamed_stage')
+
+        logger.info(f"Executing stage '{stage_name}' with {len(agent_ids)} agent(s) in {execution_mode} mode")
+
+        # Build context variables based on previous stage outputs
+        context_vars = {}
+
+        if all_stage_outputs:
+            # Build actor_outputs from actor stage
+            if 'actor' in all_stage_outputs:
+                actor_results = all_stage_outputs['actor']
+                actor_outputs_text = "\n\n".join([
+                    f"## Actor Agent {idx + 1} Output:\n{result.rules_extracted}"
+                    for idx, result in enumerate(actor_results)
+                ])
+                context_vars['actor_outputs'] = actor_outputs_text
+                context_vars['actor_outputs_summary'] = actor_outputs_text  # Use same text for summary
+
+            # Build critic_output from critic stage
+            if 'critic' in all_stage_outputs:
+                critic_results = all_stage_outputs['critic']
+                if critic_results:
+                    # Typically critic stage has one output
+                    context_vars['critic_output'] = critic_results[0].rules_extracted
+                    context_vars['synthesized_rules'] = critic_results[0].rules_extracted
+
+            # Build general context string
+            all_outputs_text = ""
+            for stage_key, outputs in all_stage_outputs.items():
+                all_outputs_text += f"\n\n=== {stage_key.upper()} Stage Outputs ===\n\n"
+                for idx, result in enumerate(outputs, 1):
+                    all_outputs_text += f"Agent {idx} Output:\n{result.rules_extracted}\n\n"
+            context_vars['context'] = all_outputs_text
+            context_vars['previous_sections_summary'] = ""  # TODO: Track previous sections if needed
+
+        results = []
+
+        if execution_mode == 'parallel':
+            # Execute agents in parallel
+            with ThreadPoolExecutor(max_workers=len(agent_ids)) as executor:
+                futures = []
+                for agent_id in agent_ids:
+                    future = executor.submit(
+                        self._execute_agent_by_id,
+                        agent_id, section_title, section_content, context_vars
+                    )
+                    futures.append(future)
+
+                # Collect results
+                for future in as_completed(futures):
+                    try:
+                        result = future.result(timeout=180)  # 3 minute timeout per agent
+                        if result:
+                            results.append(result)
+                    except Exception as e:
+                        logger.error(f"Stage '{stage_name}' agent failed: {e}")
+
+        elif execution_mode == 'sequential':
+            # Execute agents one after another
+            for agent_id in agent_ids:
+                result = self._execute_agent_by_id(agent_id, section_title, section_content, context_vars)
+                if result:
+                    results.append(result)
+                    # Update context vars with latest result for next agent
+                    context_vars['context'] = context_vars.get('context', '') + f"\n\nLatest Agent Output:\n{result.rules_extracted}\n\n"
+
+        elif execution_mode == 'batched':
+            # Execute in batches (not fully implemented, fallback to parallel)
+            logger.warning(f"Batched execution mode not fully implemented for stage '{stage_name}', using parallel")
+            return self._execute_stage({**stage, 'execution_mode': 'parallel'}, section_title, section_content, all_stage_outputs)
+
+        logger.info(f"Stage '{stage_name}' completed: {len(results)} successful agent executions")
+        return results
+
+    def generate_multi_agent_test_plan(self,
+                                     source_collections: List[str],
                                      source_doc_ids: List[str],
-                                     doc_title: str = "Test Plan") -> FinalTestPlan:
+                                     doc_title: str = "Test Plan",
+                                     agent_set_id: int = None) -> FinalTestPlan:
         """
         Main entry point for multi-agent test plan generation
+
+        Args:
+            source_collections: List of ChromaDB collections to query
+            source_doc_ids: List of specific document IDs to include
+            doc_title: Title for the generated test plan
+            agent_set_id: ID of agent set to use for orchestration (required)
+
+        Raises:
+            ValueError: If agent_set_id is None or invalid
         """
         logger.info("=== STARTING MULTI-AGENT TEST PLAN GENERATION ===")
         start_time = time.time()
-        
+
+        # Validate agent_set_id is provided
+        if agent_set_id is None:
+            raise ValueError("agent_set_id is required. Please select an agent set from the Agent Set Manager.")
+
         # Generate unique pipeline ID for this run
         pipeline_id = f"pipeline_{uuid.uuid4().hex[:12]}"
-        
+
+        # Load agent set configuration
+        logger.info(f"Using agent set ID: {agent_set_id}")
+        agent_set_config = self._load_agent_set_configuration(agent_set_id)
+        if not agent_set_config:
+            raise ValueError(f"Failed to load agent set {agent_set_id}. Agent set may not exist or is invalid.")
+
         try:
             # 0. Validate model availability and fallback to llama if needed
             self._maybe_fallback_to_llama(pipeline_id)
@@ -151,7 +408,7 @@ class MultiAgentTestPlanService:
                 logger.warning(f"Failed to mark pipeline processing: {e}")
 
             # 4. Deploy actor agents for each section (parallel processing)
-            section_results = self._deploy_section_agents(pipeline_id, sections)
+            section_results = self._deploy_section_agents(pipeline_id, sections, agent_set_config)
             
             # 5. Deploy final critic agent to consolidate everything
             # If aborted, do not run final critic; return partial/aborted plan
@@ -461,9 +718,23 @@ class MultiAgentTestPlanService:
         
         logger.info(f"Pipeline {pipeline_id} initialized with {len(sections)} sections")
     
-    def _deploy_section_agents(self, pipeline_id: str, sections: Dict[str, str]) -> List[CriticResult]:
-        """Deploy multiple agents per section with Redis coordination"""
-        logger.info(f"Deploying agents for {len(sections)} sections")
+    def _deploy_section_agents(self, pipeline_id: str, sections: Dict[str, str], agent_set_config: Optional[Dict[str, Any]] = None) -> List[CriticResult]:
+        """
+        Deploy multiple agents per section with Redis coordination
+
+        Args:
+            pipeline_id: Unique pipeline identifier
+            sections: Dictionary of section title -> content
+            agent_set_config: Optional agent set configuration. If None, uses default orchestration.
+
+        Returns:
+            List of CriticResult objects for each section
+        """
+        if agent_set_config:
+            logger.info(f"Deploying agents for {len(sections)} sections using agent set configuration")
+            logger.info(f"Agent set has {len(agent_set_config.get('stages', []))} stages")
+        else:
+            logger.info(f"Deploying agents for {len(sections)} sections using default orchestration")
         
         section_results = []
         
@@ -479,8 +750,8 @@ class MultiAgentTestPlanService:
                     self.redis_client.hset(f"pipeline:{pipeline_id}:section:{idx}", "status", "ABORTED")
                     break
                 future = executor.submit(
-                    self._process_section_with_multi_agents, 
-                    pipeline_id, idx, section_title, section_content
+                    self._process_section_with_multi_agents,
+                    pipeline_id, idx, section_title, section_content, agent_set_config
                 )
                 future_to_section[future] = section_title
             
@@ -500,13 +771,26 @@ class MultiAgentTestPlanService:
         logger.info(f"Completed processing {len(section_results)} sections")
         return section_results
     
-    def _process_section_with_multi_agents(self, 
-                                         pipeline_id: str, 
+    def _process_section_with_multi_agents(self,
+                                         pipeline_id: str,
                                          section_idx: int,
-                                         section_title: str, 
-                                         section_content: str) -> Optional[CriticResult]:
-        """Process a single section with multiple actor agents + critic"""
-        
+                                         section_title: str,
+                                         section_content: str,
+                                         agent_set_config: Dict[str, Any]) -> Optional[CriticResult]:
+        """
+        Process a single section with agents from agent set configuration
+
+        Args:
+            pipeline_id: Unique pipeline identifier
+            section_idx: Section index number
+            section_title: Title of the section
+            section_content: Content of the section
+            agent_set_config: Agent set configuration (required)
+
+        Returns:
+            CriticResult or None if aborted/failed
+        """
+
         # Respect abort flag early
         if self._is_aborted(pipeline_id):
             self.redis_client.hset(f"pipeline:{pipeline_id}:section:{section_idx}", "status", "ABORTED")
@@ -514,25 +798,59 @@ class MultiAgentTestPlanService:
 
         # Update section status
         self.redis_client.hset(f"pipeline:{pipeline_id}:section:{section_idx}", "status", "PROCESSING")
-        
+
         try:
-            # 1. Deploy multiple actor agents in parallel
-            actor_results = self._run_actor_agents(section_title, section_content)
-            
-            # Store actor results in Redis
-            for result in actor_results:
-                result_key = f"pipeline:{pipeline_id}:actor:{section_idx}:{result.agent_id}"
-                result_data = {
-                    "agent_id": result.agent_id,
-                    "model_name": result.model_name,
-                    "section_title": result.section_title,
-                    "rules_extracted": result.rules_extracted,
-                    "processing_time": result.processing_time
-                }
-                self.redis_client.hset(result_key, mapping=result_data)
-            
-            # 2. Deploy critic agent to synthesize actor results
-            critic_result = self._run_critic_agent(section_title, section_content, actor_results)
+            # Execute agents based on agent_set_config
+            if 'stages' not in agent_set_config:
+                raise ValueError("Agent set configuration must contain 'stages'")
+
+            if agent_set_config and 'stages' in agent_set_config:
+                logger.info(f"Using custom agent set orchestration with {len(agent_set_config['stages'])} stages")
+
+                # Execute stages in sequence, passing context between them
+                all_stage_results = []
+                all_stage_outputs = {}  # Track outputs by stage name for context building
+
+                for stage_idx, stage in enumerate(agent_set_config['stages']):
+                    stage_name = stage.get('stage_name', f'stage_{stage_idx}')
+                    logger.info(f"Executing stage {stage_idx + 1}/{len(agent_set_config['stages'])}: {stage_name}")
+
+                    stage_results = self._execute_stage(stage, section_title, section_content, all_stage_outputs)
+                    all_stage_results.extend(stage_results)
+
+                    # Track this stage's outputs by name for future stages
+                    all_stage_outputs[stage_name] = stage_results
+
+                # Use the last stage's results as final actor results
+                actor_results = all_stage_results if all_stage_results else []
+
+                # Store all stage results in Redis
+                for result in actor_results:
+                    result_key = f"pipeline:{pipeline_id}:actor:{section_idx}:{result.agent_id}"
+                    result_data = {
+                        "agent_id": result.agent_id,
+                        "model_name": result.model_name,
+                        "section_title": result.section_title,
+                        "rules_extracted": result.rules_extracted,
+                        "processing_time": result.processing_time
+                    }
+                    self.redis_client.hset(result_key, mapping=result_data)
+
+                # For agent sets, use the final stage output as the synthesized result
+                # Create a CriticResult from the final outputs
+                if actor_results:
+                    final_output = "\n\n".join([r.rules_extracted for r in actor_results])
+                    critic_result = CriticResult(
+                        section_title=section_title,
+                        synthesized_rules=final_output,
+                        dependencies=[],
+                        conflicts=[],
+                        test_procedures=[],  # TODO: Parse test procedures from output
+                        actor_count=len(actor_results)
+                    )
+                else:
+                    logger.warning(f"No results from agent set stages for section: {section_title}")
+                    critic_result = None
             
             # Store critic result in Redis
             if critic_result:
@@ -596,11 +914,37 @@ class MultiAgentTestPlanService:
         return actor_results
     
     def _run_single_actor(self, agent_id: str, model: str, section_title: str, section_content: str) -> Optional[ActorResult]:
-        """Run a single GPT-4 actor agent (based on notebook's extract_rules_with_llm)"""
+        """
+        Run a single actor agent with database-backed prompts.
+
+        Prompts are loaded from database via agent_registry if available,
+        otherwise falls back to hardcoded prompts.
+        """
         start_time = time.time()
-        
+
         try:
-            prompt = f"""You are a compliance and test planning expert.
+            # Try to get prompts from database first
+            # agent_id format: "actor_0_b4e879d5" where 0 is the index
+            parts = agent_id.split('_')
+            actor_index = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+            agent_prompts = self.agent_registry.get_actor_agent_prompts(actor_index)
+
+            if agent_prompts:
+                # Use database-backed prompts
+                system_prompt = agent_prompts['system_prompt']
+                user_prompt_template = agent_prompts['user_prompt_template']
+
+                # Replace placeholders
+                user_prompt = user_prompt_template.replace('{section_title}', section_title)
+                user_prompt = user_prompt.replace('{section_content}', section_content)
+
+                # Combine system and user prompts
+                prompt = f"{system_prompt}\n\n{user_prompt}"
+
+                logger.debug(f"Actor {agent_id}: Using database-backed prompts")
+            else:
+                # Fallback to hardcoded prompt
+                prompt = f"""You are a compliance and test planning expert.
 
 Analyze the following section of a military standard and extract EVERY possible testable rule, specification, constraint, or requirement. Rules MUST be extremely detailed, explicit, and step-by-step, and should include measurable criteria, acceptable ranges, and referenced figures or tables if mentioned.
 
@@ -629,14 +973,15 @@ Section Text:
 ---
 If you find truly nothing testable, reply: 'No testable rules in this section.'
 """
-            
+                logger.debug(f"Actor {agent_id}: Using hardcoded fallback prompts")
+
             response = self.llm_service.query_direct(
                 model_name=model,
                 query=prompt
             )[0]
-            
+
             processing_time = time.time() - start_time
-            
+
             return ActorResult(
                 agent_id=agent_id,
                 model_name=model,
@@ -644,25 +989,51 @@ If you find truly nothing testable, reply: 'No testable rules in this section.'
                 rules_extracted=response,
                 processing_time=processing_time
             )
-            
+
         except Exception as e:
-            logger.error(f"GPT-4 Actor {agent_id} failed: {e}")
+            logger.error(f"Actor {agent_id} failed: {e}")
             return None
     
     def _run_critic_agent(self, section_title: str, section_content: str, actor_results: List[ActorResult]) -> Optional[CriticResult]:
-        """Run GPT-4 critic agent to synthesize actor outputs (based on notebook's critic_review_rules)"""
-        
+        """
+        Run critic agent with database-backed prompts to synthesize actor outputs.
+
+        Prompts are loaded from database via agent_registry if available,
+        otherwise falls back to hardcoded prompts.
+        """
+
         if not actor_results:
             logger.warning(f"No actor results to critique for section: {section_title}")
             return None
-        
+
         try:
             # Prepare actor outputs for critic
             actor_outputs_text = ""
             for result in actor_results:
                 actor_outputs_text += f"\n\nModel {result.model_name} ({result.agent_id}):\n{result.rules_extracted}\n{'='*40}"
-            
-            prompt = f"""You are a senior test planning reviewer (Critic AI).
+
+            # Try to get prompts from database first
+            critic_prompts = self.agent_registry.get_critic_agent_prompts()
+
+            if critic_prompts:
+                # Use database-backed prompts
+                system_prompt = critic_prompts['system_prompt']
+                user_prompt_template = critic_prompts['user_prompt_template']
+
+                # Build context for prompt replacement
+                # The template should have placeholders like {section_title}, {section_content}, {actor_outputs}
+                user_prompt = user_prompt_template.replace('{section_title}', section_title)
+                user_prompt = user_prompt.replace('{section_content}', section_content)
+                user_prompt = user_prompt.replace('{actor_outputs}', actor_outputs_text)
+                user_prompt = user_prompt.replace('{actor_count}', str(len(actor_results)))
+
+                # Combine system and user prompts
+                prompt = f"{system_prompt}\n\n{user_prompt}"
+
+                logger.debug("Critic: Using database-backed prompts")
+            else:
+                # Fallback to hardcoded prompt
+                prompt = f"""You are a senior test planning reviewer (Critic AI).
 
 Given the following section and rules extracted by several different GPT-4 models, do the following:
 1. Carefully review and compare the provided rule sets.
@@ -683,7 +1054,8 @@ Section Text:
 Actor Outputs from {len(actor_results)} GPT-4 models:
 {actor_outputs_text}
 """
-            
+                logger.debug("Critic: Using hardcoded fallback prompts")
+
             response = self.llm_service.query_direct(
                 model_name=self.critic_model,
                 query=prompt
@@ -713,12 +1085,12 @@ Actor Outputs from {len(actor_results)} GPT-4 models:
     def _deploy_final_critic_agent(self, pipeline_id: str, section_results: List[CriticResult], doc_title: str) -> FinalTestPlan:
         """Deploy final GPT-4 critic agent to consolidate all sections"""
         logger.info("Deploying final GPT-4 critic agent for consolidation")
-        
+
         try:
             # Prepare all section results for final critic
             sections_summary = []
             all_sections_content = ""
-            
+
             for result in section_results:
                 sections_summary.append({
                     "title": result.section_title,
@@ -727,19 +1099,49 @@ Actor Outputs from {len(actor_results)} GPT-4 models:
                     "test_procedures_count": len(result.test_procedures),
                     "actor_count": result.actor_count
                 })
-                
+
                 all_sections_content += f"\n\n## {result.section_title}\n"
                 all_sections_content += result.synthesized_rules
                 all_sections_content += "\n" + "="*60
-            
-            # Final critic prompt (based on notebook's final_test_plan_docx logic)
-            prompt = f"""You are a final Critic AI creating a comprehensive MIL-STD test plan.
+
+            # Check if content is too large for context window
+            # Rough estimate: 1 token ≈ 4 characters
+            estimated_tokens = len(all_sections_content) / 4
+            max_context_tokens = 7000  # Conservative limit for gpt-4 (8192 total - overhead)
+
+            if estimated_tokens > max_context_tokens:
+                logger.warning(f"Content too large for final critic ({estimated_tokens:.0f} tokens estimated). Skipping final consolidation and assembling directly from sections.")
+
+                # Assemble document directly from section results without LLM consolidation
+                final_markdown = f"# {doc_title}\n\n"
+                final_markdown += "## Table of Contents\n\n"
+
+                for idx, result in enumerate(section_results, 1):
+                    final_markdown += f"{idx}. {result.section_title}\n"
+
+                final_markdown += "\n---\n\n"
+
+                for idx, result in enumerate(section_results, 1):
+                    final_markdown += f"## {idx}. {result.section_title}\n\n"
+                    final_markdown += result.synthesized_rules
+                    final_markdown += "\n\n---\n\n"
+
+                final_markdown += "## Summary & Recommendations\n\n"
+                final_markdown += f"This test plan covers {len(section_results)} sections with comprehensive test procedures and requirements.\n\n"
+                final_markdown += "**Note**: Document assembled directly from section results due to size. Each section has been individually synthesized by multiple AI agents and reviewed by a critic agent.\n"
+
+            else:
+                # Content fits in context window - use final critic for consolidation
+                logger.info(f"Content size acceptable ({estimated_tokens:.0f} tokens estimated). Running final critic consolidation.")
+
+                # Final critic prompt (based on notebook's final_test_plan_docx logic)
+                prompt = f"""You are a final Critic AI creating a comprehensive MIL-STD test plan.
 
 Given the following detailed section-by-section test rule reports (each synthesized from multiple GPT-4 actor agents), combine them into a single, fully ordered, professional test plan document:
 
 1. Use a Title Page: '{doc_title}'
 2. Generate a Table of Contents using ALL main section titles, in order
-3. For each section, include the detailed test rules and procedures  
+3. For each section, include the detailed test rules and procedures
 4. End with a 'Summary & Recommendations' section synthesizing the most critical points and overall compliance strategy
 
 Only main content-based section titles should be in TOC, no subheadings like 'Dependencies', 'Test Rules', etc.
@@ -758,14 +1160,16 @@ DETAILED SECTIONS:
 
 Create a comprehensive markdown document that consolidates all {len(section_results)} sections into a cohesive test plan.
 """
-            
-            response = self.llm_service.query_direct(
-                model_name=self.final_critic_model,
-                query=prompt
-            )[0]
-            
+
+                response = self.llm_service.query_direct(
+                    model_name=self.final_critic_model,
+                    query=prompt
+                )[0]
+
+                final_markdown = response
+
             # Apply final deduplication
-            final_markdown = self._final_global_deduplicate(response)
+            final_markdown = self._final_global_deduplicate(final_markdown)
             
             # Calculate totals
             total_requirements = sum(len(result.test_procedures) for result in section_results)

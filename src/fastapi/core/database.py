@@ -52,7 +52,7 @@ for i, delay in enumerate(retry_delays):
         logger.info(f"Database connection established successfully on attempt {i+1}")
         break
     except OperationalError as e:
-        logger.error(f"✗ Database not ready (attempt {i+1}/{len(retry_delays)}): {e}")
+        logger.error(f" Database not ready (attempt {i+1}/{len(retry_delays)}): {e}")
         if i < len(retry_delays) - 1:
             logger.info(f"  Retrying in {delay} seconds...")
             time.sleep(delay)
@@ -116,13 +116,36 @@ def get_database_health() -> Dict[str, Any]:
 
 def init_db() -> None:
     """
-    Initialize database tables.
+    Initialize database with idempotent migration system.
 
-    This function should be called during application startup to ensure
-    all tables are created. Note: In production, use Alembic migrations instead.
+    This function is safe to call on every startup:
+    - Fresh deploy: Runs all migrations from scratch
+    - Restart with volumes: Skips already-applied migrations
+    - Volume removed: Re-runs all migrations automatically
 
-    Important: This import triggers all model registrations through models/__init__.py
+    Uses migration tracking table to ensure idempotency.
     """
     from models import Base
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables initialized")
+
+    try:
+        # Step 1: Create all base tables (idempotent)
+        Base.metadata.create_all(bind=engine)
+        logger.info(" Base database tables ensured")
+
+        # Step 2: Run tracked migrations (idempotent)
+        from db.init_db import initialize_database
+
+        logger.info("Running database migrations...")
+        success = initialize_database(force=False)
+
+        if success:
+            logger.info(" Database initialization completed successfully")
+        else:
+            logger.error(" Database initialization failed - some migrations did not apply")
+            # Don't raise exception - allow app to start even if migrations fail
+            # This allows for manual intervention
+
+    except Exception as e:
+        logger.error(f"Error during database initialization: {e}")
+        # Re-raise to prevent app startup if critical initialization fails
+        raise

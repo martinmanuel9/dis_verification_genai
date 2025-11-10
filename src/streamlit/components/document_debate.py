@@ -63,43 +63,25 @@ def document_based_debate(agents, agent_choices, collections):
             else:
                 st.warning("No collections available. Upload a document first.")
     
-    # USE EXISTING DOCUMENT 
+    # USE EXISTING DOCUMENT
     elif input_method == "Use Existing Document":
         with st.container(border=True):
             st.write("**Use Existing Document for Debate**")
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.write("**Browse Documents**")
-                browse_documents(key_prefix="doc_debate_browse")
-            
-            with col2:
-                st.write("**Document Selection**")
-                if collections:
-                    collection_for_debate = st.selectbox(
-                        "Select Collection:", 
-                        collections, 
-                        key="doc_debate_existing_collection",
-                        help="Choose which collection contains your document"
-                    )
-                    
-                    document_id = st.text_input(
-                        "Document ID:",
-                        placeholder="e.g. 12345abcde",
-                        key="doc_debate_existing_doc_id",
-                        help="Copy the document ID from the browse section above"
-                    )
-                    
-                    # Use selected document ID from browse if available
-                    if st.session_state.get('selected_doc_id'):
-                        document_id = st.session_state.get('selected_doc_id')
-                        st.success(f"Using selected document: {document_id}")
-                else:
-                    st.warning("No collections available. Upload documents first.")
-                    collection_for_debate = None
-                    document_id = None
-            
+
+            # Browse and select document
+            browse_documents(key_prefix="doc_debate_browse")
+
+            # Get selected document and collection from session state
+            document_id = st.session_state.get('selected_doc_id')
+            collection_for_debate = st.session_state.get('selected_collection')
+
+            # Show selection status
+            if document_id:
+                st.success(f"Document Selected")
+                st.code(f"Document ID: {document_id}", language=None)
+
+            st.markdown("---")
+
             # Debate prompt for existing document
             debate_content = st.text_area(
                 "Debate Topic/Prompt for Document:",

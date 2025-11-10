@@ -32,8 +32,9 @@ class AgentManager:
             List of agent dictionaries
         """
         try:
+            # Use new unified agent API endpoint
             agent_data = api_client.get(
-                f"{config.endpoints.agent}/get-agents",
+                f"{config.fastapi_url}/api/test-plan-agents",
                 timeout=timeout
             )
             agents = agent_data.get("agents", [])

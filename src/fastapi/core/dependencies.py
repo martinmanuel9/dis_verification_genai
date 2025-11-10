@@ -181,32 +181,7 @@ def get_chat_repository(db: Session = Depends(get_db)):
 # Service Dependencies
 # ============================================================================
 
-def get_compliance_service(db: Session = Depends(get_db)):
-    """
-    Get ComplianceService instance.
-
-    Args:
-        db: Database session (automatically injected)
-
-    Returns:
-        ComplianceService: Compliance business logic layer
-    """
-    from services import ComplianceService
-    return ComplianceService(db)
-
-
-def get_citation_service(db: Session = Depends(get_db)):
-    """
-    Get CitationService instance.
-
-    Args:
-        db: Database session (automatically injected)
-
-    Returns:
-        CitationService: Citation business logic layer
-    """
-    from services import CitationService
-    return CitationService(db)
+# Removed: get_compliance_service and get_citation_service (unused services)
 
 
 def get_llm_service(db: Session = Depends(get_db)):

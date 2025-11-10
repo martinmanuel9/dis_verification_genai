@@ -16,22 +16,88 @@ def get_embedding_model() -> SentenceTransformer:
     return SentenceTransformer(EMBEDDING_MODEL_NAME)
 
 def browse_documents(key_prefix: str = "",):
+    """
+    Browse and select documents from ChromaDB collections.
+
+    Simplified UI showing only the essential Quick Select dropdown.
+
+    Sets session state:
+    - selected_collection: The selected collection name
+    - selected_doc_id: The document ID user clicked to select
+    """
     def pref(k): return f"{key_prefix}_{k}" if key_prefix else k
+
     if st.session_state.collections:
-        col = st.selectbox("Select Collection to Browse", st.session_state.collections, key=pref("browse_collection"))
+        # Collection selector
+        col = st.selectbox(
+            "Select Collection to Browse",
+            st.session_state.collections,
+            key=pref("browse_collection")
+        )
+
+        # Load documents button
         if st.button("Load Documents", key=pref("load_documents")):
             st.session_state.documents = chromadb_service.get_documents(col)
 
-        #set collection name in session state for later use
+        # Set collection name in session state for later use
         st.session_state.selected_collection = col
 
+        # Quick Select Document dropdown
         if "documents" in st.session_state:
             docs = st.session_state.documents
             if docs:
-                # Convert Pydantic objects to dicts for DataFrame
+                # Convert Pydantic objects to dicts
                 docs_dicts = [doc.dict() if hasattr(doc, 'dict') else doc for doc in docs]
-                df = pd.DataFrame(docs_dicts)
-                st.dataframe(df, width='stretch')
+
+                st.write(f"**{len(docs_dicts)} documents available**")
+
+                # Create readable document options
+                doc_options = {}
+                for doc in docs_dicts:
+                    doc_id = doc.get('document_id', 'unknown')
+                    doc_name = doc.get('document_name', 'Unnamed')
+                    # Truncate long names for display
+                    display_name = f"{doc_name[:50]}{'...' if len(doc_name) > 50 else ''}"
+                    doc_options[display_name] = {
+                        'document_id': doc_id,
+                        'name': doc_name,
+                        'has_images': doc.get('has_images', False),
+                        'total_chunks': doc.get('total_chunks', 'N/A')
+                    }
+
+                # Quick Select dropdown
+                selected_display = st.selectbox(
+                    "Select a document to use:",
+                    options=["-- Select a document --"] + list(doc_options.keys()),
+                    key=pref("doc_selector"),
+                    help="Choose a document for analysis"
+                )
+
+                if selected_display != "-- Select a document --":
+                    selected_doc_info = doc_options[selected_display]
+                    selected_doc_id = selected_doc_info['document_id']
+
+                    # Show document info and use button
+                    with st.container():
+                        col1, col2 = st.columns([2, 1])
+
+                        with col1:
+                            st.caption(f"Document: {selected_doc_info['name']}")
+                            st.caption(f"ID: {selected_doc_id[:20]}...")
+
+                        with col2:
+                            if st.button("Use This", key=pref("use_doc"), type="primary", use_container_width=True):
+                                st.session_state.selected_doc_id = selected_doc_id
+                                st.success("Document selected!")
+                                st.rerun()
+
+                        # Show metadata badges
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.caption(f"Chunks: {selected_doc_info['total_chunks']}")
+                        with col_b:
+                            if selected_doc_info['has_images']:
+                                st.caption("Contains images")
             else:
                 st.info("No documents found in this collection.")
     else:

@@ -14,6 +14,8 @@ from api.chromadb_api import chromadb_api_router
 from api.redis_api import redis_api_router
 from api.vectordb_api import vectordb_api_router
 from api.models_api import models_api_router
+from api.test_plan_agent_api import router as test_plan_agent_router
+from api.agent_set_api import router as agent_set_router
 
 app = FastAPI()
 
@@ -31,6 +33,8 @@ app.include_router(chromadb_api_router, prefix="/api")
 app.include_router(redis_api_router, prefix="/api")
 app.include_router(vectordb_api_router, prefix="/api")
 app.include_router(models_api_router, prefix="/api")
+app.include_router(test_plan_agent_router)
+app.include_router(agent_set_router)
 
 @app.get("/")
 async def root():

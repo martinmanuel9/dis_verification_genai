@@ -72,20 +72,17 @@ def get_query_type_badge(rec: dict) -> str:
     query_type = rec.get('query_type', 'unknown')
 
     badge_colors = {
-        'direct': ('🔵', '#0066cc'),
-        'rag': ('🟢', '#00aa00'),
-        'rag_agent': ('🟣', '#9933cc'),
-        'rag_debate_sequence': ('🟠', '#ff8800'),
-        'legal_research': ('⚖️', '#cc0000'),
-        'document_evaluation': ('📄', '#666666'),
+        'direct': ('Direct', '#0066cc'),
+        'rag': ('RAG', '#00aa00'),
+        'rag_agent': ('RAG Agent', '#9933cc'),
+        'rag_debate_sequence': ('RAG Debate', '#ff8800'),
+        'legal_research': ('Legal Research', '#cc0000'),
+        'document_evaluation': ('Document Eval', '#666666'),
     }
 
-    emoji, color = badge_colors.get(query_type, ('⚪', '#999999'))
+    display_type, color = badge_colors.get(query_type, (query_type.replace('_', ' ').title(), '#999999'))
 
-    # Format the query type for display
-    display_type = query_type.replace('_', ' ').title()
-
-    return f'<span style="color: {color}; font-weight: bold;">{emoji} {display_type}</span>'
+    return f'<span style="color: {color}; font-weight: bold;">{display_type}</span>'
 
 
 def Chat_History(key_prefix: str = "",):
@@ -165,7 +162,7 @@ def Chat_History(key_prefix: str = "",):
 
             # Search and filter
             search_query = st.text_input(
-                "🔍 Search conversations:",
+                "Search conversations:",
                 value=st.session_state[pref("search_query")],
                 placeholder="Search by title, question, or response content...",
                 key=pref("search_input")
@@ -219,12 +216,12 @@ def Chat_History(key_prefix: str = "",):
                 st.metric("Page", f"{current_page} of {total_pages}")
 
             with col3:
-                if st.button("⬅ Previous", key=pref("prev_page"), disabled=current_page <= 1):
+                if st.button("Previous", key=pref("prev_page"), disabled=current_page <= 1):
                     st.session_state[pref("current_page")] = max(1, current_page - 1)
                     st.rerun()
 
             with col4:
-                if st.button("Next ➡", key=pref("next_page"), disabled=current_page >= total_pages):
+                if st.button("Next", key=pref("next_page"), disabled=current_page >= total_pages):
                     st.session_state[pref("current_page")] = min(total_pages, current_page + 1)
                     st.rerun()
 
@@ -253,7 +250,7 @@ def Chat_History(key_prefix: str = "",):
                 query_type_badge = get_query_type_badge(rec)
 
                 # Create header with title and metadata (plain text for expander)
-                header_text = f"{title} • {readable_time}"
+                header_text = f"{title} - {readable_time}"
 
                 with st.expander(header_text, expanded=False):
                     # Show query type badge and action buttons
@@ -358,4 +355,3 @@ def Chat_History(key_prefix: str = "",):
                     st.error(f"Error exporting chat history: {str(e)}")
             else:
                 st.warning("No chat history available. Please load history first.")
-                

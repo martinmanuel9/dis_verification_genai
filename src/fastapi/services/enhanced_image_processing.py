@@ -89,7 +89,7 @@ class EnhancedImageProcessingPipeline:
                 detect_drawings=enable_drawing_detection,
                 probe_threshold=0.01 if enable_visual_probing else 1.0  # Disable probe if threshold too high
             )
-            logger.info("✅ Image extraction service initialized")
+            logger.info(" Image extraction service initialized")
         except Exception as e:
             logger.error(f"Failed to initialize extraction service: {e}")
             raise
@@ -101,7 +101,7 @@ class EnhancedImageProcessingPipeline:
                 max_workers=max_description_workers,
                 api_key=api_key
             )
-            logger.info("✅ Image description service initialized")
+            logger.info(" Image description service initialized")
         except Exception as e:
             logger.error(f"Failed to initialize description service: {e}")
             raise

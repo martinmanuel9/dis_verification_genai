@@ -12,10 +12,10 @@ def Agent_Sim():
     FASTAPI_API = config.endpoints.agent
     # Display collections
     collections = st.session_state.collections
-    
+
     # Load agents with enhanced error handling
     col1_load, col2_load = st.columns([1, 2])
-    
+
     with col1_load:
         if st.button("Refresh Agent List"):
             try:

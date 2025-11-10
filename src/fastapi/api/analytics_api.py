@@ -1,10 +1,12 @@
 # New dependency injection imports
-from core.dependencies import get_db, get_session_repository, get_agent_repository
+from core.dependencies import get_db, get_session_repository
+from core.database import get_db as get_db_session
 from models.enums import SessionType, AnalysisType
-from models.agent import ComplianceAgent
+from models.agent import ComplianceAgent, TestPlanAgent
 from models.session import AgentSession
 from models.response import AgentResponse
-from repositories import SessionRepository, AgentRepository
+from repositories import SessionRepository
+from repositories.test_plan_agent_repository import TestPlanAgentRepository
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
@@ -73,13 +75,13 @@ async def get_agent_session_details(
 @analytics_api_router.get("/agent-performance/{agent_id}")
 async def get_agent_performance_metrics(
     agent_id: int,
-    agent_repo: AgentRepository = Depends(get_agent_repository),
     db: Session = Depends(get_db)
 ) -> dict:
     """Get performance metrics for a specific agent"""
     try:
-        # Check if agent exists
-        agent = agent_repo.get(agent_id)
+        # Check if agent exists in TestPlanAgent table
+        agent_repo = TestPlanAgentRepository()
+        agent = agent_repo.get_by_id(agent_id, db)
         if not agent:
             raise HTTPException(
                 status_code=404,
@@ -193,17 +195,17 @@ async def get_session_analytics(days: int = 7, db: Session = Depends(get_db)):
             AgentSession.total_response_time_ms.isnot(None)
         ).scalar()
         
-        # Most active agents
+        # Most active agents (using TestPlanAgent table)
         active_agents = db.query(
             AgentResponse.agent_id,
-            ComplianceAgent.name,
+            TestPlanAgent.name,
             func.count(AgentResponse.id).label('response_count')
         ).join(
-            ComplianceAgent, AgentResponse.agent_id == ComplianceAgent.id
+            TestPlanAgent, AgentResponse.agent_id == TestPlanAgent.id
         ).filter(
             AgentResponse.created_at >= start_date
         ).group_by(
-            AgentResponse.agent_id, ComplianceAgent.name
+            AgentResponse.agent_id, TestPlanAgent.name
         ).order_by(
             func.count(AgentResponse.id).desc()
         ).limit(10).all()

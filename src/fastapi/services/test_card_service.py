@@ -193,7 +193,7 @@ Requirements:
 - 'Expected Results' should specify exactly what happens when test passes (include specific values)
 - 'Acceptance Criteria' should define measurable pass/fail thresholds
 - 'Dependencies' should list prerequisites (leave empty if none)
-- Leave 'Executed', 'Pass', and 'Fail' empty with checkbox (☐). Do NOT tick anything.
+- Leave 'Executed', 'Pass', and 'Fail' empty with checkbox (). Do NOT tick anything.
 - Use short, content-based titles (not generic like "Test 1" or "Test 2")
 - Derive tests from the 'Test Rules' section content
 
@@ -295,7 +295,7 @@ IMPORTANT: Return ONLY the JSON array, no additional text or formatting."""
             test_title = tc.test_title.replace('|', '\\|')
             dependencies_str = ", ".join(tc.dependencies).replace('|', '\\|') if tc.dependencies else ""
 
-            table += f"| {tc.test_id} | {test_title} | {procedures_str} | {expected_results} | {acceptance_criteria} | {dependencies_str} | ☐ | ☐ | ☐ | |\n"
+            table += f"| {tc.test_id} | {test_title} | {procedures_str} | {expected_results} | {acceptance_criteria} | {dependencies_str} |  |  |  | |\n"
 
         return table
 
@@ -331,9 +331,9 @@ IMPORTANT: Return ONLY the JSON array, no additional text or formatting."""
             row_cells[2].text = '\n'.join([f"{i+1}) {p}" for i, p in enumerate(tc.procedures)])
             row_cells[3].text = tc.expected_results
             row_cells[4].text = tc.acceptance_criteria
-            row_cells[5].text = '☐'
-            row_cells[6].text = '☐'
-            row_cells[7].text = '☐'
+            row_cells[5].text = ''
+            row_cells[6].text = ''
+            row_cells[7].text = ''
             row_cells[8].text = ''
 
         return table
@@ -467,9 +467,9 @@ IMPORTANT: Return ONLY the JSON array, no additional text or formatting."""
                     try:
                         test_card = future.result()
                         test_cards[section_title] = test_card
-                        logger.info(f"✅ [{completed}/{total}] Generated test card for: {section_title}")
+                        logger.info(f" [{completed}/{total}] Generated test card for: {section_title}")
                     except Exception as e:
-                        logger.error(f"❌ [{completed}/{total}] Failed to generate test card for {section_title}: {e}")
+                        logger.error(f" [{completed}/{total}] Failed to generate test card for {section_title}: {e}")
                         continue
 
             logger.info(f"Successfully generated {len(test_cards)} test cards in parallel")

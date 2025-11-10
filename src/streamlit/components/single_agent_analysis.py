@@ -85,43 +85,25 @@ def single_agent_analysis(agents, agent_choices, collections):
                 st.warning("No collections available. Upload a document first.")
                 collection_name = None
 
-    # USE EXISTING DOCUMENT 
+    # USE EXISTING DOCUMENT
     elif input_method == "Use Existing Document":
         with st.container(border=True):
             st.write("**Use Existing Document from Collections**")
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.write("**Browse Documents**")
-                browse_documents(key_prefix="single_browse")
-            
-            with col2:
-                st.write("**Document Selection**")
-                if collections:
-                    collection_name = st.selectbox(
-                        "Select Collection:", 
-                        collections, 
-                        key="existing_collection",
-                        help="Choose which collection contains your document"
-                    )
-                    
-                    document_id = st.text_input(
-                        "Document ID:",
-                        placeholder="e.g. 12345abcde",
-                        key="existing_doc_id",
-                        help="Copy the document ID from the browse section above"
-                    )
-                    
-                    # Use selected document ID from browse if available
-                    if st.session_state.get('selected_doc_id'):
-                        document_id = st.session_state.get('selected_doc_id')
-                        st.success(f"Using selected document: {document_id}")
-                else:
-                    st.warning("No collections available. Upload documents first.")
-                    collection_name = None
-                    document_id = None
-            
+
+            # Browse and select document
+            browse_documents(key_prefix="single_browse")
+
+            # Get selected document and collection from session state
+            document_id = st.session_state.get('selected_doc_id')
+            collection_name = st.session_state.get('selected_collection')
+
+            # Show selection status
+            if document_id:
+                st.success(f"Document Selected")
+                st.code(f"Document ID: {document_id}", language=None)
+
+            st.markdown("---")
+
             # Analysis prompt for existing document
             analysis_content = st.text_area(
                 "Analysis Prompt for Document:",

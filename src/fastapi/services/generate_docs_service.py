@@ -554,23 +554,31 @@ class DocumentService:
         source_collections: Optional[List[str]] = None,
         source_doc_ids: Optional[List[str]] = None,
         doc_title: Optional[str] = None,
+        agent_set_id: int = None,
     ) -> List[dict]:
         """
         Generate test plan using multi-agent architecture:
-        1. 3x GPT-4 Actor Agents per section extract requirements
-        2. 1x GPT-4 Critic Agent synthesizes actor outputs per section
-        3. 1x GPT-4 Final Critic Agent consolidates all sections  
+        1. Actor agents per section extract requirements
+        2. Critic agent synthesizes actor outputs per section
+        3. Final Critic agent consolidates all sections
         4. Redis pipeline for scalable processing
         5. Export to Word document and save to generated_documents
+
+        Args:
+            source_collections: List of ChromaDB collections
+            source_doc_ids: List of specific document IDs
+            doc_title: Title for the generated test plan
+            agent_set_id: Required agent set ID for orchestration
         """
         try:
             print("===== STARTING MULTI-AGENT TEST PLAN GENERATION =====")
-            
+
             # Use the multi-agent test plan service
             test_plan_result = self.multi_agent_test_plan_service.generate_multi_agent_test_plan(
                 source_collections=source_collections or [],
                 source_doc_ids=source_doc_ids or [],
-                doc_title=doc_title or "Test Plan"
+                doc_title=doc_title or "Test Plan",
+                agent_set_id=agent_set_id
             )
             
             print(f"Multi-agent pipeline generated: {test_plan_result.total_requirements} requirements, {test_plan_result.total_test_procedures} procedures from {test_plan_result.total_sections} sections")
@@ -840,7 +848,7 @@ class DocumentService:
             
     #         # Add notice about fallback mode
     #         notice_para = doc.add_paragraph()
-    #         notice_run = notice_para.add_run("⚠️ NOTICE: ")
+    #         notice_run = notice_para.add_run(" NOTICE: ")
     #         notice_run.bold = True
     #         notice_para.add_run("This test plan was generated in fallback mode due to missing source documents. "
     #                           "Please customize the test procedures based on your specific requirements and upload "

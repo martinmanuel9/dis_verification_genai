@@ -10,10 +10,9 @@ from config.env import env
 from components.healthcheck_sidebar import Healthcheck_Sidebar
 from components.direct_chat import Direct_Chat
 from components.agent_sim import Agent_Sim
-from components.ai_agent import AI_Agent
 from components.document_generator import Document_Generator
 from components.test_card_viewer import TestCardViewer
-from components.rag_assessment import rag_assessment_dashboard
+from components.unified_agent_manager import render_unified_agent_manager
 from components.session_history import Session_History
 
 torch.classes.__path__ = []
@@ -57,7 +56,7 @@ Healthcheck_Sidebar()
 # Chat mode selection
 chat_mode = st.radio(
     "Select Mode:",
-    ["Direct Chat", "AI Agent Simulation", "AI Agents", "Document Generator", "Test Card Viewer", "RAG Assessment", "Session History"],
+    ["Direct Chat", "AI Agent Simulation", "Agent & Orchestration Manager", "Document Generator", "Test Card Viewer", "Session History"],
     horizontal=True
 )
 
@@ -76,16 +75,15 @@ elif chat_mode == "AI Agent Simulation":
     Agent_Sim()
 
 # ----------------------------------------------------------------------
-# CREATE AGENT MODE (WITH MANAGEMENT SUB-MODES)
+# UNIFIED AGENT & ORCHESTRATION MANAGER MODE
 # ----------------------------------------------------------------------
-elif chat_mode == "AI Agents":
+elif chat_mode == "Agent & Orchestration Manager":
     st.markdown("---")
-    AI_Agent()
-    
-    # Footer for create agent section
+    render_unified_agent_manager()
+
+    # Footer for agent management section
     st.warning("**Agent Disclaimer**: All created agents provide analysis for informational purposes only and do not constitute advice.")
     st.info("**Data Security**: Ensure all content processed by agents complies with your organization's data protection and confidentiality policies.")
-
 
 # ----------------------------------------------------------------------
 # DOCUMENT GENERATOR MODE
@@ -102,19 +100,11 @@ elif chat_mode == "Test Card Viewer":
     TestCardViewer()
 
 # ----------------------------------------------------------------------
-# RAG ASSESSMENT MODE
-# ----------------------------------------------------------------------
-elif chat_mode == "RAG Assessment":
-    st.markdown("---")
-    rag_assessment_dashboard()
-
-# ----------------------------------------------------------------------
 # SESSION HISTORY & ANALYTICS MODE
 # ----------------------------------------------------------------------
 elif chat_mode == "Session History":
     st.markdown("---")
     Session_History()
-    
 
 
 # Footer

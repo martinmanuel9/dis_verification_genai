@@ -29,10 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from core.database import engine, SessionLocal
 import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Get logger without configuring (let uvicorn handle logging configuration)
 logger = logging.getLogger(__name__)
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
@@ -258,11 +255,11 @@ def run_migration_file(
             )
             # In production, you might want to fail here or require manual intervention
         else:
-            logger.info(f"⏭  Skipping '{migration_name}' (already applied)")
+            logger.info(f"Skipping '{migration_name}' (already applied)")
         return True
 
     # Run the migration
-    logger.info(f"▶  Running migration: {migration_name}")
+    logger.info(f"Running migration: {migration_name}")
 
     try:
         start_time = time.time()

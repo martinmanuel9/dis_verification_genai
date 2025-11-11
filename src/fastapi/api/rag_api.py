@@ -9,10 +9,9 @@ from schemas import (
     RAGAssessmentRequest, RAGAnalyticsRequest, RAGBenchmarkRequest,
     RAGMetricsExportRequest
 )
-import logging 
+import logging
 
-logging.basicConfig(level=logging.INFO)
-
+# Get logger without configuring (let uvicorn handle logging configuration)
 logger = logging.getLogger("RAG_API_LOGGER")
 
 rag_api_router = APIRouter(prefix="/rag", tags=["rag"])

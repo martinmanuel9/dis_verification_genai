@@ -1638,10 +1638,22 @@ This test plan was generated in fallback mode due to section extraction issues.
             if list_response.ok:
                 collections = list_response.json().get("collections", [])
                 if name not in collections:
-                    requests.post(
+                    logger.info(f"Collection '{name}' does not exist. Creating it...")
+                    create_response = requests.post(
                         f"{self.fastapi_url}/api/vectordb/collection/create",
                         params={"collection_name": name},
                         timeout=10
                     )
+                    if create_response.ok:
+                        logger.info(f"Successfully created collection '{name}'")
+                    else:
+                        logger.error(f"Failed to create collection '{name}': {create_response.status_code} - {create_response.text}")
+                        raise Exception(f"Collection creation failed: {create_response.text}")
+                else:
+                    logger.debug(f"Collection '{name}' already exists")
+            else:
+                logger.error(f"Failed to list collections: {list_response.status_code} - {list_response.text}")
+                raise Exception(f"Failed to verify collections: {list_response.text}")
         except Exception as e:
-            logger.warning(f"Unable to ensure collection {name}: {e}")
+            logger.error(f"Unable to ensure collection {name}: {e}")
+            raise

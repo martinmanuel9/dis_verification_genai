@@ -98,6 +98,7 @@ class ComplianceAgent(Base):
 
     # Unified fields for modular agent system
     agent_type = Column(String, index=True)  # actor, critic, contradiction, gap_analysis, compliance, custom
+    workflow_type = Column(String, index=True)  # document_analysis, test_plan_generation, general
     is_system_default = Column(Boolean, default=False, index=True)
     description = Column(Text)
     agent_metadata = Column(JSON, default={})
@@ -120,52 +121,4 @@ class ComplianceAgent(Base):
     created_by = Column(String)
     is_active = Column(Boolean, default=True)
 
-
-class TestPlanAgent(Base):
-    """
-    Test plan generation agent model.
-
-    This model stores specialized agents for test plan generation pipeline:
-    - Actor: Extract testable requirements from document sections
-    - Critic: Synthesize and deduplicate actor outputs
-    - Contradiction: Detect contradictions and conflicts in test procedures
-    - Gap Analysis: Identify requirement gaps and missing test coverage
-
-    Integrates with config/agent_registry.py for centralized agent management.
-    Replaces hardcoded agents with database-backed, user-configurable agents.
-
-    Attributes:
-        id: Primary key
-        name: Unique agent name
-        agent_type: Type of agent ('actor', 'critic', 'contradiction', 'gap_analysis')
-        model_name: LLM model identifier (validated against llm_config.MODEL_REGISTRY)
-        system_prompt: System-level instruction prompt
-        user_prompt_template: Template for user prompts
-        temperature: LLM temperature (0.0-1.0)
-        max_tokens: Maximum tokens for response
-        is_system_default: Whether this is a system-provided default agent
-        is_active: Active status flag
-        created_at: Creation timestamp
-        updated_at: Last update timestamp
-        created_by: User who created/modified the agent
-        description: Human-readable description of agent's purpose
-        agent_metadata: Additional configuration (JSON) - mapped to 'metadata' column
-    """
-    __tablename__ = "test_plan_agents"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    agent_type = Column(String, nullable=False, index=True)  # actor, critic, contradiction, gap_analysis
-    model_name = Column(String, nullable=False)
-    system_prompt = Column(Text, nullable=False)
-    user_prompt_template = Column(Text, nullable=False)
-    temperature = Column(Float, default=0.7)
-    max_tokens = Column(Integer, default=4000)
-    is_system_default = Column(Boolean, default=False, index=True)
-    is_active = Column(Boolean, default=True, index=True)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc), index=True)
-    updated_at = Column(DateTime, default=datetime.now(timezone.utc), index=True, onupdate=datetime.now(timezone.utc))
-    created_by = Column(String)
-    description = Column(Text)
-    agent_metadata = Column(JSON)  # Now column name matches attribute name
 

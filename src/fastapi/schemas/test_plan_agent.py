@@ -13,6 +13,7 @@ class TestPlanAgentBase(BaseModel):
     """Base schema for test plan agent"""
     name: str = Field(..., min_length=1, max_length=200, description="Agent name")
     agent_type: str = Field(..., description="Type of agent (actor, critic, contradiction, gap_analysis)")
+    workflow_type: str = Field(..., description="Workflow category (document_analysis, test_plan_generation, general)")
     model_name: str = Field(..., description="LLM model identifier (e.g., 'gpt-4', 'claude-3-5-sonnet')")
     system_prompt: str = Field(..., min_length=10, description="System-level instruction prompt")
     user_prompt_template: str = Field(..., min_length=10, description="Template for user prompts")
@@ -25,15 +26,24 @@ class TestPlanAgentBase(BaseModel):
     @classmethod
     def validate_agent_type(cls, v):
         """Validate agent type - supports all unified agent types"""
-        valid_types = ['actor', 'critic', 'contradiction', 'gap_analysis', 'general', 'rule_development', 'custom']
+        valid_types = ['actor', 'critic', 'contradiction', 'gap_analysis', 'general', 'rule_development', 'custom', 'compliance']
         if v not in valid_types:
             raise ValueError(f"agent_type must be one of: {', '.join(valid_types)}")
         return v
 
+    @field_validator('workflow_type')
+    @classmethod
+    def validate_workflow_type(cls, v):
+        """Validate workflow type - distinguishes agent purpose"""
+        valid_types = ['document_analysis', 'test_plan_generation', 'general']
+        if v not in valid_types:
+            raise ValueError(f"workflow_type must be one of: {', '.join(valid_types)}")
+        return v
+
     # Removed strict placeholder validation - different agent types use different placeholders
-    # Actor agents use {section_title}, {section_content}
-    # Critic agents use {section_title}, {section_content}, {actor_outputs}
-    # Contradiction/Gap agents use custom placeholders
+    # Document Analysis agents use {data_sample}
+    # Test Plan Generation agents use {section_title}, {section_content}, {actor_outputs}, etc.
+    # General agents use flexible placeholders
 
 
 class CreateTestPlanAgentRequest(TestPlanAgentBase):
@@ -46,6 +56,7 @@ class CreateTestPlanAgentRequest(TestPlanAgentBase):
 class UpdateTestPlanAgentRequest(BaseModel):
     """Request schema for updating a test plan agent"""
     name: Optional[str] = Field(None, min_length=1, max_length=200, description="Agent name")
+    workflow_type: Optional[str] = Field(None, description="Workflow category")
     model_name: Optional[str] = Field(None, description="LLM model identifier")
     system_prompt: Optional[str] = Field(None, min_length=10, description="System prompt")
     user_prompt_template: Optional[str] = Field(None, min_length=10, description="User prompt template")
@@ -54,6 +65,16 @@ class UpdateTestPlanAgentRequest(BaseModel):
     is_active: Optional[bool] = Field(None, description="Whether agent is active")
     description: Optional[str] = Field(None, description="Description")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional configuration")
+
+    @field_validator('workflow_type')
+    @classmethod
+    def validate_workflow_type(cls, v):
+        """Validate workflow type if provided"""
+        if v is not None:
+            valid_types = ['document_analysis', 'test_plan_generation', 'general']
+            if v not in valid_types:
+                raise ValueError(f"workflow_type must be one of: {', '.join(valid_types)}")
+        return v
 
     # Removed strict placeholder validation - see TestPlanAgentBase for explanation
 

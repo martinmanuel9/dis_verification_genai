@@ -15,7 +15,10 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml.shared import OxmlElement, qn
 from sqlalchemy.orm import Session
-from services.database import ComplianceAgent, ChatHistory, AgentResponse, DebateSession
+from models.agent import ComplianceAgent
+from models.chat import ChatHistory
+from models.response import AgentResponse
+from models.session import DebateSession
 import logging
 import tempfile
 import subprocess

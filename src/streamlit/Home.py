@@ -12,7 +12,7 @@ from components.direct_chat import Direct_Chat
 from components.agent_sim import Agent_Sim
 from components.document_generator import Document_Generator
 from components.test_card_viewer import TestCardViewer
-from components.unified_agent_manager import render_unified_agent_manager
+from components.agent_manager import render_unified_agent_manager
 from components.session_history import Session_History
 
 torch.classes.__path__ = []
@@ -80,10 +80,6 @@ elif chat_mode == "AI Agent Simulation":
 elif chat_mode == "Agent & Orchestration Manager":
     st.markdown("---")
     render_unified_agent_manager()
-
-    # Footer for agent management section
-    st.warning("**Agent Disclaimer**: All created agents provide analysis for informational purposes only and do not constitute advice.")
-    st.info("**Data Security**: Ensure all content processed by agents complies with your organization's data protection and confidentiality policies.")
 
 # ----------------------------------------------------------------------
 # DOCUMENT GENERATOR MODE

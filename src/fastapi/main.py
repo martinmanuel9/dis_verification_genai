@@ -4,6 +4,7 @@ load_dotenv()
 from fastapi import FastAPI
 from core.database import init_db
 import uvicorn
+import logging
 from api.chat_api import chat_api_router
 from api.agent_api import agent_api_router
 from api.rag_api import rag_api_router
@@ -21,6 +22,17 @@ app = FastAPI()
 
 @app.on_event("startup")
 def on_startup():
+    # Configure database initialization loggers to show migration info
+    # Enable INFO level for all database-related loggers
+    for logger_name in ["db.init_db", "db.migrations.run_migrations"]:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        # Ensure it has a handler (use uvicorn's handler)
+        if not logger.handlers:
+            uvicorn_logger = logging.getLogger("uvicorn")
+            if uvicorn_logger.handlers:
+                logger.addHandler(uvicorn_logger.handlers[0])
+
     init_db()
 
 app.include_router(chat_api_router, prefix="/api")
@@ -33,12 +45,23 @@ app.include_router(chromadb_api_router, prefix="/api")
 app.include_router(redis_api_router, prefix="/api")
 app.include_router(vectordb_api_router, prefix="/api")
 app.include_router(models_api_router, prefix="/api")
-app.include_router(test_plan_agent_router)
-app.include_router(agent_set_router)
+app.include_router(test_plan_agent_router, prefix="/api")
+app.include_router(agent_set_router, prefix="/api")
 
 @app.get("/")
 async def root():
     return {"message": "Welcome to the FastAPI Service"}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=9020, workers=4, reload=True)
+    import os
+
+    # Determine environment mode
+    env = os.getenv("ENVIRONMENT", "development").lower()
+
+    if env == "production":
+        # Production: Multiple workers, no reload
+        uvicorn.run("main:app", host="0.0.0.0", port=9020, workers=4)
+    else:
+        # Development: Single worker with hot reload
+        # Note: reload=True is incompatible with workers > 1
+        uvicorn.run("main:app", host="0.0.0.0", port=9020, reload=True)

@@ -4,9 +4,9 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
 from services.llm_invoker import LLMInvoker
-from config.model_registry import (
-    list_supported_models,
-)
+# from config.model_registry import (
+#     list_supported_models,
+# )
 from llm_config.llm_config import get_model_config
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain

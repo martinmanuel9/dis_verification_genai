@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+import warnings
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from schemas import ComplianceCheckRequest, CreateAgentResponse, CreateAgentRequest, GetAgentsResponse, UpdateAgentRequest, UpdateAgentResponse
@@ -11,17 +12,46 @@ from repositories import AgentRepository
 import time
 import uuid
 from datetime import datetime, timezone
-import logging 
+import logging
+
+# Issue deprecation warning when module is imported
+warnings.warn(
+    "agent_api module is deprecated. Use test_plan_agent_api instead. "
+    "See /api/test-plan-agents/* for new endpoints.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 logger = logging.getLogger("AGENT_API_LOGGER")
 
-agent_api_router = APIRouter(prefix="/agent", tags=["agent"])
+agent_api_router = APIRouter(
+    prefix="/agent",
+    tags=["agent (DEPRECATED)"],
+    deprecated=True
+)
+
+
+def add_deprecation_headers(response: Response):
+    """Add deprecation headers to response"""
+    response.headers["X-API-Deprecated"] = "true"
+    response.headers["X-API-Deprecation-Info"] = "Migrate to /api/test-plan-agents/*"
+    response.headers["X-API-Sunset"] = "2026-01-01"  # Planned removal date
+    response.headers["Link"] = '</api/test-plan-agents>; rel="alternate"'
+
 
 @agent_api_router.post("/compliance-check")
 async def compliance_check(
     request: ComplianceCheckRequest,
+    response: Response,
     db: Session = Depends(get_db),
     agent_service: AgentService = Depends(get_agent_service_legacy)):
+    """
+    DEPRECATED: Use POST /api/test-plan-agents/compliance-check instead
+
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
+
     try:
         result = agent_service.run_compliance_check(
             data_sample=request.data_sample,
@@ -35,9 +65,16 @@ async def compliance_check(
 @agent_api_router.post("/create-agent", response_model=CreateAgentResponse)
 async def create_agent(
     request: CreateAgentRequest,
+    response: Response,
     agent_repo: AgentRepository = Depends(get_agent_repository),
     db: Session = Depends(get_db)):
-    """Create a new compliance agent using repository pattern"""
+    """
+    DEPRECATED: Use POST /api/test-plan-agents instead
+
+    Create a new compliance agent using repository pattern.
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
     try:
         # Check if agent name already exists using repository
         if agent_repo.exists_by_name(request.name):
@@ -46,11 +83,15 @@ async def create_agent(
                 detail=f"Agent with name '{request.name}' already exists"
             )
 
-        # Validate that user_prompt_template contains {data_sample}
-        if "{data_sample}" not in request.user_prompt_template:
+        # Validate that user_prompt_template contains a supported placeholder
+        # Supports: {data_sample} (compliance), {section_content} (test plan), or custom placeholders
+        supported_placeholders = ["{data_sample}", "{section_content}"]
+        has_placeholder = any(placeholder in request.user_prompt_template for placeholder in supported_placeholders)
+
+        if not has_placeholder:
             raise HTTPException(
                 status_code=400,
-                detail="User prompt template must contain {data_sample} placeholder"
+                detail=f"User prompt template must contain at least one supported placeholder: {', '.join(supported_placeholders)}"
             )
 
         # Prepare agent data
@@ -102,8 +143,15 @@ async def create_agent(
 
 @agent_api_router.get("/get-agents", response_model=GetAgentsResponse)
 async def get_agents(
+    response: Response,
     agent_repo: AgentRepository = Depends(get_agent_repository)):
-    """Get all compliance agents using repository pattern"""
+    """
+    DEPRECATED: Use GET /api/test-plan-agents instead
+
+    Get all compliance agents using repository pattern.
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
     try:
         agents = agent_repo.get_all()
 
@@ -128,9 +176,16 @@ async def get_agents(
 async def update_agent(
     agent_id: int,
     request: UpdateAgentRequest,
+    response: Response,
     agent_repo: AgentRepository = Depends(get_agent_repository),
     db: Session = Depends(get_db)):
-    """Update an existing compliance agent using repository pattern"""
+    """
+    DEPRECATED: Use PUT /api/test-plan-agents/{agent_id} instead
+
+    Update an existing compliance agent using repository pattern.
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
     try:
         # Check if agent exists
         existing_agent = agent_repo.get(agent_id)
@@ -207,8 +262,15 @@ async def update_agent(
 @agent_api_router.get("/get-agent/{agent_id}")
 async def get_agent_by_id(
     agent_id: int,
+    response: Response,
     agent_repo: AgentRepository = Depends(get_agent_repository)):
-    """Get a specific agent by ID using repository pattern"""
+    """
+    DEPRECATED: Use GET /api/test-plan-agents/{agent_id} instead
+
+    Get a specific agent by ID using repository pattern.
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
     try:
         agent = agent_repo.get(agent_id)
 
@@ -232,9 +294,16 @@ async def get_agent_by_id(
 @agent_api_router.delete("/delete-agent/{agent_id}")
 async def delete_agent(
     agent_id: int,
+    response: Response,
     agent_repo: AgentRepository = Depends(get_agent_repository),
     db: Session = Depends(get_db)):
-    """Delete a compliance agent and handle foreign key relationships using repository pattern"""
+    """
+    DEPRECATED: Use DELETE /api/test-plan-agents/{agent_id} instead
+
+    Delete a compliance agent and handle foreign key relationships using repository pattern.
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
     try:
         deletion_result = agent_repo.delete_cascade(agent_id)
         db.commit()
@@ -259,9 +328,16 @@ async def delete_agent(
 @agent_api_router.patch("/toggle-agent-status/{agent_id}")
 async def toggle_agent_status(
     agent_id: int,
+    response: Response,
     agent_repo: AgentRepository = Depends(get_agent_repository),
     db: Session = Depends(get_db)):
-    """Toggle agent active/inactive status using repository pattern"""
+    """
+    DEPRECATED: Use POST /api/test-plan-agents/{agent_id}/activate instead
+
+    Toggle agent active/inactive status using repository pattern.
+    This endpoint will be removed in the next major version.
+    """
+    add_deprecation_headers(response)
     try:
         agent = agent_repo.toggle_status(agent_id)
         db.commit()

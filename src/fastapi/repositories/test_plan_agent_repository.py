@@ -2,7 +2,10 @@
 Test Plan Agent Repository
 
 Data access layer for test plan agent database operations.
-Provides CRUD operations and queries for TestPlanAgent model.
+Provides CRUD operations and queries for test plan agents using the unified ComplianceAgent model.
+
+Note: This repository now uses the ComplianceAgent table (unified architecture).
+The old TestPlanAgent model and test_plan_agents table are deprecated.
 """
 
 from typing import List, Optional, Dict, Any
@@ -10,8 +13,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from datetime import datetime, timezone
 
-from models.agent import TestPlanAgent
+from models.agent import ComplianceAgent
 from core.exceptions import DatabaseException
+
+# Type alias for backward compatibility
+TestPlanAgent = ComplianceAgent
 
 
 class TestPlanAgentRepository:
@@ -21,7 +27,7 @@ class TestPlanAgentRepository:
         self,
         session: Session,
         include_inactive: bool = False
-    ) -> List[TestPlanAgent]:
+    ) -> List[ComplianceAgent]:
         """
         Get all test plan agents.
 
@@ -30,23 +36,23 @@ class TestPlanAgentRepository:
             include_inactive: Include inactive agents
 
         Returns:
-            List of TestPlanAgent objects
+            List of ComplianceAgent objects
         """
-        query = session.query(TestPlanAgent)
+        query = session.query(ComplianceAgent)
 
         if not include_inactive:
-            query = query.filter(TestPlanAgent.is_active == True)
+            query = query.filter(ComplianceAgent.is_active == True)
 
         return query.order_by(
-            TestPlanAgent.agent_type,
-            TestPlanAgent.created_at
+            ComplianceAgent.agent_type,
+            ComplianceAgent.created_at
         ).all()
 
     def get_by_id(
         self,
         agent_id: int,
         session: Session
-    ) -> Optional[TestPlanAgent]:
+    ) -> Optional[ComplianceAgent]:
         """
         Get agent by ID.
 
@@ -55,17 +61,17 @@ class TestPlanAgentRepository:
             session: Database session
 
         Returns:
-            TestPlanAgent or None
+            ComplianceAgent or None
         """
-        return session.query(TestPlanAgent).filter(
-            TestPlanAgent.id == agent_id
+        return session.query(ComplianceAgent).filter(
+            ComplianceAgent.id == agent_id
         ).first()
 
     def get_by_name(
         self,
         name: str,
         session: Session
-    ) -> Optional[TestPlanAgent]:
+    ) -> Optional[ComplianceAgent]:
         """
         Get agent by name.
 
@@ -74,10 +80,10 @@ class TestPlanAgentRepository:
             session: Database session
 
         Returns:
-            TestPlanAgent or None
+            ComplianceAgent or None
         """
-        return session.query(TestPlanAgent).filter(
-            TestPlanAgent.name == name
+        return session.query(ComplianceAgent).filter(
+            ComplianceAgent.name == name
         ).first()
 
     def get_by_type(
@@ -85,7 +91,7 @@ class TestPlanAgentRepository:
         agent_type: str,
         session: Session,
         include_inactive: bool = False
-    ) -> List[TestPlanAgent]:
+    ) -> List[ComplianceAgent]:
         """
         Get all agents of a specific type.
 
@@ -95,22 +101,22 @@ class TestPlanAgentRepository:
             include_inactive: Include inactive agents
 
         Returns:
-            List of TestPlanAgent objects
+            List of ComplianceAgent objects
         """
-        query = session.query(TestPlanAgent).filter(
-            TestPlanAgent.agent_type == agent_type
+        query = session.query(ComplianceAgent).filter(
+            ComplianceAgent.agent_type == agent_type
         )
 
         if not include_inactive:
-            query = query.filter(TestPlanAgent.is_active == True)
+            query = query.filter(ComplianceAgent.is_active == True)
 
-        return query.order_by(TestPlanAgent.created_at).all()
+        return query.order_by(ComplianceAgent.created_at).all()
 
     def get_default_agents(
         self,
         session: Session,
         agent_type: Optional[str] = None
-    ) -> List[TestPlanAgent]:
+    ) -> List[ComplianceAgent]:
         """
         Get system default agents.
 
@@ -119,23 +125,23 @@ class TestPlanAgentRepository:
             agent_type: Optional filter by agent type
 
         Returns:
-            List of default TestPlanAgent objects
+            List of default ComplianceAgent objects
         """
-        query = session.query(TestPlanAgent).filter(
-            TestPlanAgent.is_system_default == True,
-            TestPlanAgent.is_active == True
+        query = session.query(ComplianceAgent).filter(
+            ComplianceAgent.is_system_default == True,
+            ComplianceAgent.is_active == True
         )
 
         if agent_type:
-            query = query.filter(TestPlanAgent.agent_type == agent_type)
+            query = query.filter(ComplianceAgent.agent_type == agent_type)
 
-        return query.order_by(TestPlanAgent.agent_type).all()
+        return query.order_by(ComplianceAgent.agent_type).all()
 
     def get_user_created_agents(
         self,
         session: Session,
         agent_type: Optional[str] = None
-    ) -> List[TestPlanAgent]:
+    ) -> List[ComplianceAgent]:
         """
         Get user-created (non-default) agents.
 
@@ -144,23 +150,23 @@ class TestPlanAgentRepository:
             agent_type: Optional filter by agent type
 
         Returns:
-            List of user-created TestPlanAgent objects
+            List of user-created ComplianceAgent objects
         """
-        query = session.query(TestPlanAgent).filter(
-            TestPlanAgent.is_system_default == False,
-            TestPlanAgent.is_active == True
+        query = session.query(ComplianceAgent).filter(
+            ComplianceAgent.is_system_default == False,
+            ComplianceAgent.is_active == True
         )
 
         if agent_type:
-            query = query.filter(TestPlanAgent.agent_type == agent_type)
+            query = query.filter(ComplianceAgent.agent_type == agent_type)
 
-        return query.order_by(TestPlanAgent.created_at.desc()).all()
+        return query.order_by(ComplianceAgent.created_at.desc()).all()
 
     def create(
         self,
         agent_data: Dict[str, Any],
         session: Session
-    ) -> TestPlanAgent:
+    ) -> ComplianceAgent:
         """
         Create a new test plan agent.
 
@@ -169,7 +175,7 @@ class TestPlanAgentRepository:
             session: Database session
 
         Returns:
-            Created TestPlanAgent
+            Created ComplianceAgent
 
         Raises:
             DatabaseException: If creation fails
@@ -180,7 +186,7 @@ class TestPlanAgentRepository:
             if existing:
                 raise ValueError(f"Agent with name '{agent_data.get('name')}' already exists")
 
-            agent = TestPlanAgent(**agent_data)
+            agent = ComplianceAgent(**agent_data)
             session.add(agent)
             session.commit()
             session.refresh(agent)
@@ -198,7 +204,7 @@ class TestPlanAgentRepository:
         agent_id: int,
         agent_data: Dict[str, Any],
         session: Session
-    ) -> TestPlanAgent:
+    ) -> ComplianceAgent:
         """
         Update an existing test plan agent.
 
@@ -208,7 +214,7 @@ class TestPlanAgentRepository:
             session: Database session
 
         Returns:
-            Updated TestPlanAgent
+            Updated ComplianceAgent
 
         Raises:
             DatabaseException: If update fails
@@ -293,7 +299,7 @@ class TestPlanAgentRepository:
         self,
         agent_id: int,
         session: Session
-    ) -> TestPlanAgent:
+    ) -> ComplianceAgent:
         """
         Activate a deactivated agent.
 
@@ -302,7 +308,7 @@ class TestPlanAgentRepository:
             session: Database session
 
         Returns:
-            Activated TestPlanAgent
+            Activated ComplianceAgent
 
         Raises:
             DatabaseException: If activation fails
@@ -332,7 +338,7 @@ class TestPlanAgentRepository:
         session: Session,
         agent_type: Optional[str] = None,
         include_inactive: bool = False
-    ) -> List[TestPlanAgent]:
+    ) -> List[ComplianceAgent]:
         """
         Search agents by name or description.
 
@@ -343,22 +349,22 @@ class TestPlanAgentRepository:
             include_inactive: Include inactive agents
 
         Returns:
-            List of matching TestPlanAgent objects
+            List of matching ComplianceAgent objects
         """
-        query = session.query(TestPlanAgent).filter(
+        query = session.query(ComplianceAgent).filter(
             or_(
-                TestPlanAgent.name.ilike(f"%{search_term}%"),
-                TestPlanAgent.description.ilike(f"%{search_term}%")
+                ComplianceAgent.name.ilike(f"%{search_term}%"),
+                ComplianceAgent.description.ilike(f"%{search_term}%")
             )
         )
 
         if agent_type:
-            query = query.filter(TestPlanAgent.agent_type == agent_type)
+            query = query.filter(ComplianceAgent.agent_type == agent_type)
 
         if not include_inactive:
-            query = query.filter(TestPlanAgent.is_active == True)
+            query = query.filter(ComplianceAgent.is_active == True)
 
-        return query.order_by(TestPlanAgent.created_at.desc()).all()
+        return query.order_by(ComplianceAgent.created_at.desc()).all()
 
     def clone_agent(
         self,
@@ -366,7 +372,7 @@ class TestPlanAgentRepository:
         new_name: str,
         session: Session,
         created_by: Optional[str] = None
-    ) -> TestPlanAgent:
+    ) -> ComplianceAgent:
         """
         Clone an existing agent with a new name.
 
@@ -377,7 +383,7 @@ class TestPlanAgentRepository:
             created_by: User creating the clone
 
         Returns:
-            Cloned TestPlanAgent
+            Cloned ComplianceAgent
 
         Raises:
             DatabaseException: If cloning fails

@@ -13,7 +13,7 @@ This package contains all API endpoint routers organized by domain:
 """
 
 from .chat_api import chat_api_router
-from .agent_api import agent_api_router
+# from .agent_api import agent_api_router
 from .rag_api import rag_api_router
 from .health_api import health_api_router
 from .document_generation_api import doc_gen_api_router

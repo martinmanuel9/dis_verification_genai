@@ -15,18 +15,14 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from services.llm_utils import get_llm
 from services.llm_invoker import LLMInvoker
 
-from services.database import (
-    SessionLocal,
-    ComplianceAgent,
-    # DebateSession removed in Phase 5 - no longer needed for debate sequences
-    log_compliance_result,
-    log_agent_response,
-    log_agent_session,
-    complete_agent_session,
-    log_rag_citations,
-    SessionType,
-    AnalysisType
-)
+from core.database import SessionLocal
+from models.agent import ComplianceAgent
+from models.enums import SessionType, AnalysisType
+from repositories.session_repository import SessionRepository
+from repositories.response_repository import ResponseRepository, ComplianceRepository
+from repositories.citation_repository import CitationRepository
+# Note: Function calls to log_agent_session, log_agent_response, etc.
+# need to be migrated to use repository methods (similar to agent_service.py)
 from repositories.chat_repository import ChatRepository
 
 logger = logging.getLogger("RAG_SERVICE_LOGGER")
@@ -956,7 +952,7 @@ INSTRUCTIONS:
         db = SessionLocal()
         try:
             # Find the most recent response for this agent in this session
-            from services.database import AgentResponse
+            from models.response import AgentResponse
             response = db.query(AgentResponse).filter(
                 AgentResponse.session_id == session_id,
                 AgentResponse.agent_id == agent_id

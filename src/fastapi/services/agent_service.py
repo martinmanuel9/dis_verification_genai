@@ -5,25 +5,19 @@ from typing import Dict, List, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm import Session
 from datetime import datetime
-from services.database import (
-    SessionLocal, ComplianceAgent, DebateSession, log_compliance_result,log_agent_response,
-    log_agent_session, log_agent_response, complete_agent_session,
-    SessionType, AnalysisType
-)
-from langchain_ollama import OllamaLLM
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from pydantic import BaseModel, Field
+
+# New architecture imports
+from core.database import SessionLocal
+from models.agent import ComplianceAgent
+from models.session import DebateSession
+from models.enums import SessionType, AnalysisType
+from repositories.session_repository import SessionRepository
+from repositories.response_repository import ResponseRepository, ComplianceRepository
+
 from langchain.output_parsers import PydanticOutputParser
 from schemas import ComplianceResultSchema
 from services.llm_invoker import LLMInvoker
 from repositories.chat_repository import ChatRepository
-
-class ComplianceResult(BaseModel):
-    # compliant: bool = Field(description="Whether the content is compliant")
-    reason: str = Field(description="Explanation for the compliance decision")
-    confidence: Optional[float] = Field(default=None, description="Confidence score")
 
 class AgentService:
     """AgentService using LangChain for compliance verification and debate."""
@@ -103,9 +97,11 @@ class AgentService:
         """Main compliance check - WORKS with unified LLM path"""
         session_id = str(uuid.uuid4())
         start_time = time.time()
-        
+
+        # Create session repository and log session start
+        session_repo = SessionRepository(db)
         session_type = SessionType.MULTI_AGENT_DEBATE if len(agent_ids) > 1 else SessionType.SINGLE_AGENT
-        log_agent_session(
+        session_repo.create_session(
             session_id=session_id,
             session_type=session_type,
             analysis_type=AnalysisType.DIRECT_LLM,
@@ -124,9 +120,11 @@ class AgentService:
         
         # Run debate
         debate_results = self.run_debate(session_id, data_sample, db)
-        
+
         total_time = int((time.time() - start_time) * 1000)
-        complete_agent_session(
+
+        # Complete session using repository
+        session_repo.complete_session(
             session_id=session_id,
             overall_result={
                 "details": results,
@@ -193,17 +191,18 @@ class AgentService:
         try:
             model_name = agent["model_name"]
 
-            # Build prompt (same as Direct Chat approach)
+            # Build prompt - expects {data_sample} placeholder for document analysis workflow
             formatted_user_prompt = agent["user_prompt_template"].replace("{data_sample}", data_sample)
             full_prompt = f"{agent['system_prompt']}\n\n{formatted_user_prompt}"
 
             # Call LLM using LLMInvoker
             raw_text = LLMInvoker.invoke(model_name=model_name, prompt=full_prompt)
-            
+
             response_time_ms = int((time.time() - start_time) * 1000)
-            
-            # Log the response
-            log_agent_response(
+
+            # Log response using repositories
+            response_repo = ResponseRepository(db)
+            response_repo.create_response(
                 session_id=session_id,
                 agent_id=agent["id"],
                 response_text=raw_text,
@@ -212,8 +211,9 @@ class AgentService:
                 model_used=agent["model_name"],
                 analysis_summary=raw_text[:200]
             )
-            
-            log_compliance_result(
+
+            compliance_repo = ComplianceRepository(db)
+            compliance_repo.create_result(
                 agent_id=agent["id"],
                 data_sample=data_sample,
                 confidence_score=None,
@@ -303,11 +303,12 @@ class AgentService:
 
             # Call LLM using LLMInvoker
             response_text = LLMInvoker.invoke(model_name=model_name, prompt=full_prompt)
-                
+
             response_time_ms = int((time.time() - start_time) * 1000)
-            
-            # Log debate response
-            log_agent_response(
+
+            # Log debate response using repositories
+            response_repo = ResponseRepository(db)
+            response_repo.create_response(
                 session_id=session_id,
                 agent_id=agent["id"],
                 response_text=response_text,
@@ -316,8 +317,9 @@ class AgentService:
                 model_used=agent["model_name"],
                 sequence_order=sequence_order
             )
-            
-            log_compliance_result(
+
+            compliance_repo = ComplianceRepository(db)
+            compliance_repo.create_result(
                 agent_id=agent["id"],
                 data_sample=data_sample,
                 confidence_score=None,

@@ -18,7 +18,7 @@ from services.llm_service import LLMService
 from services.rag_service import RAGService
 from services.agent_service import AgentService
 from services.rag_assessment_service import RAGAssessmentService
-from services.database import SessionLocal
+from core.database import SessionLocal
 from typing import Generator
 from sqlalchemy.orm import Session
 from repositories.agent_repository import AgentRepository

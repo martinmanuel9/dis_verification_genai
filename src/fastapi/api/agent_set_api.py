@@ -31,7 +31,7 @@ from core.exceptions import DatabaseException
 
 # Create router
 router = APIRouter(
-    prefix="/api/agent-sets",
+    prefix="/agent-sets",
     tags=["Agent Sets"]
 )
 

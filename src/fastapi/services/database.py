@@ -420,8 +420,9 @@ class RAGCitation(Base):
     agent_response = relationship("AgentResponse", back_populates="citations")
 
 # Utilities
-def init_db():
-    Base.metadata.create_all(bind=engine)
+# DEPRECATED: This init_db() is no longer used. Use core.database.init_db() instead.
+# def init_db():
+#     Base.metadata.create_all(bind=engine)
 
 def get_db():
     db = SessionLocal()

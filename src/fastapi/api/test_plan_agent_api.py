@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_agent_service_legacy
 from repositories.test_plan_agent_repository import TestPlanAgentRepository
 from schemas.test_plan_agent import (
     CreateTestPlanAgentRequest,
@@ -27,13 +28,15 @@ from schemas.test_plan_agent import (
     BulkOperationRequest,
     BulkOperationResponse
 )
+from schemas.compliance import ComplianceCheckRequest
+from services.agent_service import AgentService
 from core.exceptions import DatabaseException
 from llm_config.llm_config import validate_model, get_model_config, MODEL_REGISTRY
 
 
 # Create router
 router = APIRouter(
-    prefix="/api/test-plan-agents",
+    prefix="/test-plan-agents",
     tags=["Test Plan Agents"]
 )
 
@@ -56,13 +59,6 @@ def orm_to_response(agent) -> TestPlanAgentResponse:
     # Debug logging
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"orm_to_response: agent.id={agent.id}, agent.name={agent.name}")
-    logger.info(f"orm_to_response: agent.agent_metadata = {agent.agent_metadata} (type: {type(agent.agent_metadata)})")
-    logger.info(f"orm_to_response: metadata_value = {metadata_value} (type: {type(metadata_value)})")
-
-    # Print to console too
-    print(f"DEBUG: About to construct TestPlanAgentResponse for agent {agent.id}")
-    print(f"DEBUG: metadata_value = {metadata_value}, type = {type(metadata_value)}")
 
     # Use model_construct to bypass validation and attribute reading
     # This prevents Pydantic from trying to read 'metadata' from the ORM model
@@ -623,3 +619,46 @@ async def validate_agent_config(
         warnings=warnings,
         model_info=model_info
     )
+
+
+# ============================================================================
+# Agent Operations (Compliance Checking)
+# ============================================================================
+
+@router.post("/compliance-check")
+async def compliance_check(
+    request: ComplianceCheckRequest,
+    db: Session = Depends(get_db),
+    agent_service: AgentService = Depends(get_agent_service_legacy)
+):
+    """
+    Run compliance check using multiple agents.
+
+    This endpoint executes a multi-agent compliance check workflow:
+    1. Runs agents in parallel to analyze the data sample
+    2. Conducts multi-agent debate for consensus
+    3. Logs all agent responses and debate results
+    4. Saves to chat history for unified tracking
+
+    Request Body:
+    - data_sample: Text content to analyze for compliance
+    - agent_ids: List of agent IDs to use for analysis (minimum 1)
+
+    Returns:
+    - details: Individual agent responses with confidence scores
+    - debate_results: Multi-agent debate outcomes
+    - session_id: Unique session identifier for tracking
+    """
+    try:
+        result = agent_service.run_compliance_check(
+            data_sample=request.data_sample,
+            agent_ids=request.agent_ids,
+            db=db
+        )
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Compliance check failed: {str(e)}"
+        )

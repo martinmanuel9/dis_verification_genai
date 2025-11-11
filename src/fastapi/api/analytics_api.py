@@ -2,7 +2,7 @@
 from core.dependencies import get_db, get_session_repository
 from core.database import get_db as get_db_session
 from models.enums import SessionType, AnalysisType
-from models.agent import ComplianceAgent, TestPlanAgent
+from models.agent import ComplianceAgent
 from models.session import AgentSession
 from models.response import AgentResponse
 from repositories import SessionRepository
@@ -195,17 +195,17 @@ async def get_session_analytics(days: int = 7, db: Session = Depends(get_db)):
             AgentSession.total_response_time_ms.isnot(None)
         ).scalar()
         
-        # Most active agents (using TestPlanAgent table)
+        # Most active agents (using unified compliance_agents table)
         active_agents = db.query(
             AgentResponse.agent_id,
-            TestPlanAgent.name,
+            ComplianceAgent.name,
             func.count(AgentResponse.id).label('response_count')
         ).join(
-            TestPlanAgent, AgentResponse.agent_id == TestPlanAgent.id
+            ComplianceAgent, AgentResponse.agent_id == ComplianceAgent.id
         ).filter(
             AgentResponse.created_at >= start_date
         ).group_by(
-            AgentResponse.agent_id, TestPlanAgent.name
+            AgentResponse.agent_id, ComplianceAgent.name
         ).order_by(
             func.count(AgentResponse.id).desc()
         ).limit(10).all()

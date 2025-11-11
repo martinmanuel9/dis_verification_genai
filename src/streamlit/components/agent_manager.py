@@ -30,14 +30,13 @@ def render_unified_agent_manager():
     """
     st.title("Agent & Orchestration Manager")
     st.markdown("""
-    Unified interface for managing AI agents and orchestration pipelines.
-
     **Agents**: Individual AI agents with specific roles (Actor, Critic, QA, etc.)
+    
     **Agent Sets**: Orchestration pipelines that combine multiple agents in stages
     """)
 
     # Top-level navigation: Agents vs Agent Sets
-    main_tab1, main_tab2 = st.tabs(["Individual Agents", "Agent Sets (Pipelines)"])
+    main_tab1, main_tab2 = st.tabs(["Individual Agents", "Agent Sets and Pipelines"])
 
     with main_tab1:
         # Sub-tabs for agent management
@@ -190,7 +189,8 @@ def render_agent_card(agent: Dict):
 
     with col1:
         st.markdown(f"### {status_color} {agent['name']}")
-        st.markdown(f"*{default_badge}* | Model: **{agent['model_name']}**")
+        workflow_badge = agent.get('workflow_type', 'general').replace('_', ' ').title()
+        st.markdown(f"*{default_badge}* | **{workflow_badge}** | Model: **{agent['model_name']}**")
 
     with col2:
         st.markdown(f"**ID:** {agent['id']}")
@@ -222,15 +222,70 @@ def render_agent_card(agent: Dict):
 
 def render_create_agent_form():
     """
-    Form to create a new agent.
+    Form to create a new agent with template auto-population.
     """
     st.subheader("Create a New Agent")
 
-    # Agent type selection
+    st.info("💡 **Tip**: Select a workflow type and agent type below, and we'll auto-populate the form with a proven template you can customize!")
+
+    # Fetch system default agents for template loading
+    try:
+        response = api_client.get(TEST_PLAN_AGENT_API, params={"include_inactive": False})
+        all_agents = response.get("agents", []) if response else []
+        system_defaults = [a for a in all_agents if a.get("is_system_default", False)]
+    except:
+        system_defaults = []
+
+    # Workflow type selection (helps users understand purpose)
+    workflow_type = st.selectbox(
+        "Workflow Type",
+        ["document_analysis", "test_plan_generation", "general"],
+        help="Select the workflow this agent will be used for",
+        key="create_workflow_type"
+    )
+
+    # Show workflow-specific guidance
+    workflow_info = {
+        "document_analysis": {
+            "description": "Single agent document compliance checks and analysis",
+            "placeholders": "{data_sample}",
+            "examples": "Compliance Checker, Requirements Extractor, Technical Reviewer"
+        },
+        "test_plan_generation": {
+            "description": "Multi-agent pipeline for test plan generation",
+            "placeholders": "{section_title}, {section_content}, {actor_outputs}, {critic_output}",
+            "examples": "Actor, Critic, Contradiction Detector, Gap Analyzer"
+        },
+        "general": {
+            "description": "General purpose agent with flexible configuration",
+            "placeholders": "Custom placeholders as needed",
+            "examples": "Custom analyzer, specialized reviewer"
+        }
+    }
+
+    info = workflow_info[workflow_type]
+    st.info(f"""
+    **{workflow_type.upper().replace('_', ' ')}**
+
+    {info['description']}
+
+    **Required Placeholders:** `{info['placeholders']}`
+
+    **Examples:** {info['examples']}
+    """)
+
+    # Agent type selection - filtered by workflow type
+    agent_type_options = {
+        "document_analysis": ["compliance", "custom"],
+        "test_plan_generation": ["actor", "critic", "contradiction", "gap_analysis"],
+        "general": ["general", "rule_development", "custom"]
+    }
+
     agent_type = st.selectbox(
         "Agent Type",
-        ["actor", "critic", "contradiction", "gap_analysis", "general", "rule_development"],
-        help="Select the type of agent to create"
+        agent_type_options.get(workflow_type, ["custom"]),
+        help="Select the specific role this agent will play",
+        key="create_agent_type"
     )
 
     # Show type-specific info
@@ -240,33 +295,81 @@ def render_create_agent_form():
         "contradiction": "Detects contradictions and conflicts in test procedures",
         "gap_analysis": "Identifies missing requirements and test coverage gaps",
         "general": "General purpose agent for systems/quality/test engineering",
-        "rule_development": "Specialized in document analysis and test plan creation"
+        "rule_development": "Specialized in document analysis and test plan creation",
+        "compliance": "Evaluates documents for compliance with requirements and standards",
+        "custom": "Custom agent with user-defined behavior"
     }
-    st.info(f"**{agent_type.upper()}**: {type_info.get(agent_type, '')}")
+    st.caption(f"**{agent_type.upper()}**: {type_info.get(agent_type, '')}")
+
+    # Find matching system default template
+    template_agent = None
+    for agent in system_defaults:
+        if agent.get('workflow_type') == workflow_type and agent.get('agent_type') == agent_type:
+            template_agent = agent
+            break
+
+    # Set default values from template
+    default_model = template_agent.get('model_name', 'gpt-4') if template_agent else 'gpt-4'
+    default_temp = template_agent.get('temperature', 0.7) if template_agent else 0.7
+    default_max_tokens = template_agent.get('max_tokens', 4000) if template_agent else 4000
+    default_description = template_agent.get('description', '') if template_agent else ''
+    default_system_prompt = template_agent.get('system_prompt', '') if template_agent else ''
+    default_user_prompt = template_agent.get('user_prompt_template', '') if template_agent else ''
+
+    if template_agent:
+        st.success(f"Template loaded: **{template_agent['name']}**")
+        st.caption(f"Form is pre-filled with this template. Customize as needed and give it a unique name.")
+    else:
+        st.warning("No system template found for this combination. You'll need to write prompts from scratch.")
 
     with st.form("create_agent_form"):
         col1, col2 = st.columns(2)
 
         with col1:
-            name = st.text_input("Agent Name *", placeholder="e.g., 'Custom Actor Agent'")
+            name = st.text_input(
+                "Agent Name *",
+                placeholder="e.g., 'My Custom Actor Agent'",
+                help="Give your agent a unique name"
+            )
+
+            available_models = config.get_available_models()
+            model_index = available_models.index(default_model) if default_model in available_models else 0
             model_name = st.selectbox(
                 "LLM Model *",
-                config.get_available_models(),
+                available_models,
+                index=model_index,
                 help="Select the language model to use"
             )
-            temperature = st.slider("Temperature", 0.0, 1.0, 0.7, 0.1,
-                                   help="Lower = more focused, Higher = more creative")
-            max_tokens = st.number_input("Max Tokens", 100, 32000, 4000, 100,
-                                        help="Maximum response length")
+
+            temperature = st.slider(
+                "Temperature",
+                0.0, 1.0,
+                float(default_temp),
+                0.1,
+                help="Lower = more focused, Higher = more creative"
+            )
+
+            max_tokens = st.number_input(
+                "Max Tokens",
+                100, 32000,
+                int(default_max_tokens),
+                100,
+                help="Maximum response length"
+            )
 
         with col2:
-            description = st.text_area("Description", height=100,
-                                      placeholder="Brief description of this agent's purpose")
+            description = st.text_area(
+                "Description",
+                value=default_description,
+                height=100,
+                placeholder="Brief description of this agent's purpose"
+            )
             is_active = st.checkbox("Active", value=True, help="Whether this agent is active")
             created_by = st.text_input("Created By", placeholder="Your name (optional)")
 
         system_prompt = st.text_area(
             "System Prompt *",
+            value=default_system_prompt,
             height=200,
             placeholder="Define the agent's role, expertise, and behavior...",
             help="Core instructions that define the agent's personality and capabilities"
@@ -274,18 +377,11 @@ def render_create_agent_form():
 
         user_prompt_template = st.text_area(
             "User Prompt Template *",
+            value=default_user_prompt,
             height=200,
-            placeholder="Template for user interactions. Use placeholders like {section_title}, {section_content}, etc.",
+            placeholder="Template for user interactions. Use appropriate placeholders.",
             help="Template that will be filled with actual data during execution"
         )
-
-        # Advanced settings
-        with st.expander("Advanced Settings (Optional)"):
-            metadata_json = st.text_area(
-                "Metadata (JSON)",
-                value="{}",
-                help="Additional configuration as JSON"
-            )
 
         # Submit button
         submitted = st.form_submit_button("Create Agent", type="primary", use_container_width=True)
@@ -310,6 +406,7 @@ def render_create_agent_form():
                 payload = {
                     "name": name.strip(),
                     "agent_type": agent_type,
+                    "workflow_type": workflow_type,
                     "model_name": model_name,
                     "system_prompt": system_prompt.strip(),
                     "user_prompt_template": user_prompt_template.strip(),
@@ -356,7 +453,8 @@ def render_manage_agents_view():
     agent_options = {f"{agent['name']} (ID: {agent['id']})": agent for agent in agents}
     selected_option = st.selectbox(
         "Select Agent to Manage",
-        ["--Select Agent--"] + list(agent_options.keys())
+        ["--Select Agent--"] + list(agent_options.keys()),
+        key="manage_agent_selector"
     )
 
     if selected_option == "--Select Agent--":
@@ -368,7 +466,8 @@ def render_manage_agents_view():
     action = st.radio(
         "Action",
         ["View Details", "Edit", "Clone", "Activate/Deactivate", "Delete"],
-        horizontal=True
+        horizontal=True,
+        key="manage_agent_action"
     )
 
     if action == "View Details":
@@ -394,6 +493,7 @@ def render_view_details(agent: Dict):
             "ID": agent['id'],
             "Name": agent['name'],
             "Type": agent['agent_type'],
+            "Workflow": agent.get('workflow_type', 'N/A'),
             "Model": agent['model_name'],
             "Temperature": agent['temperature'],
             "Max Tokens": agent['max_tokens'],
@@ -425,6 +525,18 @@ def render_edit_agent(agent: Dict):
 
         with col1:
             new_name = st.text_input("Agent Name", value=agent['name'])
+
+            # Workflow type selection
+            workflow_options = ["document_analysis", "test_plan_generation", "general"]
+            current_workflow = agent.get('workflow_type', 'general')
+            workflow_index = workflow_options.index(current_workflow) if current_workflow in workflow_options else 2
+            new_workflow_type = st.selectbox(
+                "Workflow Type",
+                workflow_options,
+                index=workflow_index,
+                help="Select the workflow this agent will be used for"
+            )
+
             new_model = st.selectbox(
                 "Model",
                 config.get_available_models(),
@@ -445,6 +557,7 @@ def render_edit_agent(agent: Dict):
         if submitted:
             payload = {
                 "name": new_name,
+                "workflow_type": new_workflow_type,
                 "model_name": new_model,
                 "system_prompt": new_system_prompt,
                 "user_prompt_template": new_user_prompt,
@@ -560,18 +673,54 @@ def render_help_info():
     st.subheader("Agent Management Guide")
 
     st.markdown("""
-    ## Agent Types
+    ## Understanding Workflow Type vs Agent Type
 
-    ### Test Plan Agents
-    - **Actor**: Extracts testable requirements from documents
-    - **Critic**: Synthesizes multiple actor outputs
-    - **Contradiction**: Detects conflicts in test procedures
+    ### Workflow Type (PURPOSE)
+    **What workflow will use this agent?**
+
+    - **Document Analysis**: Single-agent compliance checks on existing documents
+      - Endpoint: `/api/agent/compliance-check`
+      - Placeholders: `{data_sample}`
+      - Use case: Analyze a document for compliance, extract requirements, technical review
+
+    - **Test Plan Generation**: Multi-agent pipeline to create test plans
+      - Endpoint: `/api/doc/generate_optimized_test_plan`
+      - Placeholders: `{section_title}`, `{section_content}`, `{actor_outputs}`, `{critic_output}`
+      - Use case: Generate comprehensive test plans from military standards
+
+    - **General**: Flexible agents for custom workflows
+      - Placeholders: Custom as needed
+      - Use case: Your own specialized workflows
+
+    ### Agent Type (ROLE)
+    **What role does this agent play within its workflow?**
+
+    #### For Test Plan Generation:
+    - **Actor**: Extracts testable requirements (runs first, in parallel)
+    - **Critic**: Synthesizes actor outputs (runs after actors)
+    - **Contradiction**: Detects conflicts across sections
     - **Gap Analysis**: Identifies missing test coverage
 
-    ### General & Custom Agents
-    - **General**: Systems/Quality/Test engineering agents
-    - **Rule Development**: Document analysis specialists
-    - **Custom**: Create your own specialized agents
+    #### For Document Analysis:
+    - **Compliance**: Evaluates compliance with standards
+    - **Custom**: Specialized analysis (requirements extraction, technical review, etc.)
+
+    #### For General:
+    - **General**: Multi-purpose engineering agent
+    - **Rule Development**: Specialized in document analysis
+    - **Custom**: User-defined behavior
+
+    ## Creating Agents
+
+    ### Quick Start (Recommended)
+    1. Select **Workflow Type** (document_analysis, test_plan_generation, or general)
+    2. Select **Agent Type** (role within that workflow)
+    3. Form auto-populates with proven template
+    4. Customize the template and give it a unique name
+    5. Click Create!
+
+    ### Alternative: Clone Existing Agent
+    Instead of creating from scratch, go to "Manage Agents" → Select agent → "Clone"
 
     ## Best Practices
 
@@ -583,10 +732,9 @@ def render_help_info():
     - Use bullet points for clarity
 
     ### User Prompt Templates
-    - Use placeholders for dynamic content:
-      - `{section_title}`, `{section_content}` for test plan agents
-      - `{data_sample}` for general agents
-      - Custom placeholders as needed
+    - **CRITICAL**: Use correct placeholders for your workflow type
+    - Document Analysis → `{data_sample}`
+    - Test Plan Generation → `{section_title}`, `{section_content}`, etc.
     - Provide clear instructions
     - Specify desired output structure
 
@@ -597,15 +745,16 @@ def render_help_info():
 
     ### Model Selection
     - **GPT-4**: Recommended for most use cases
+    - **GPT-4o**: Faster, good for simpler tasks
     - **Claude**: Alternative for specific tasks
     - Consider cost vs. quality trade-offs
 
     ## Management Tips
+    - Use system default agents as templates
+    - Clone agents before making major changes
     - Review agent performance regularly
-    - Update prompts based on usage
     - Deactivate unused agents
     - Test after making changes
-    - Clone before major edits
     """)
 
 # ======================================================================

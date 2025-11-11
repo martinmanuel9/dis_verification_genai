@@ -13,7 +13,7 @@
 # See DEPRECATED_CODE.md for migration guide.
 # ============================================================================
 import warnings
-from services.database import ChatHistory
+from models.chat import ChatHistory
 import logging
 
 warnings.warn(

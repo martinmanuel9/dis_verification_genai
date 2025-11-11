@@ -4,7 +4,10 @@ from pydantic import BaseModel
 from typing import List, Dict, Any
 from pathlib import Path
 from services.document_ingestion_service import run_ingest_job
-from services.database import chroma_client
+from integrations.chromadb_client import get_chroma_client
+
+# Get ChromaDB client instance (backward compatibility)
+chroma_client = get_chroma_client()
 # Position-aware reconstruction imports
 from services.position_aware_reconstruction import (
     reconstruct_document_with_positions,

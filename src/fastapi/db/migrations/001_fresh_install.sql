@@ -100,7 +100,7 @@ INSERT INTO compliance_agents (
     'Actor Agent (Default)',
     'actor',
     'test_plan_generation',
-    'gpt-4',
+    'gpt-4-turbo',
     'You are an Actor Agent specialized in extracting testable requirements from military standard documents.
 
 Your role is to carefully analyze each section and extract EVERY possible testable rule, specification, constraint, or requirement.',
@@ -134,7 +134,7 @@ PROVIDE YOUR RESPONSE IN THE FOLLOWING JSON FORMAT:
   ]
 }',
     0.7,
-    4000,
+    2000,
     TRUE,
     TRUE,
     'system',
@@ -149,7 +149,7 @@ PROVIDE YOUR RESPONSE IN THE FOLLOWING JSON FORMAT:
     'Critic Agent (Default)',
     'critic',
     'test_plan_generation',
-    'gpt-4',
+    'gpt-4-turbo',
     'You are a Critic Agent responsible for synthesizing and deduplicating outputs from multiple Actor agents.
 
 Your role is to:
@@ -176,7 +176,7 @@ PROVIDE SYNTHESIZED TEST PROCEDURES:
 3. Resolve conflicts
 4. Maintain traceability to original rules',
     0.7,
-    4000,
+    2000,
     TRUE,
     TRUE,
     'system',
@@ -191,7 +191,7 @@ PROVIDE SYNTHESIZED TEST PROCEDURES:
     'Contradiction Detection Agent (Default)',
     'contradiction',
     'test_plan_generation',
-    'gpt-4',
+    'gpt-4-turbo',
     'You are a Contradiction Detection Agent specialized in identifying conflicts and inconsistencies in test procedures.
 
 Your role is to detect:
@@ -221,7 +221,7 @@ IDENTIFY AND REPORT:
 3. Logical inconsistencies
 4. Recommended resolutions',
     0.4,
-    3000,
+    2000,
     TRUE,
     TRUE,
     'system',
@@ -236,7 +236,7 @@ IDENTIFY AND REPORT:
     'Gap Analysis Agent (Default)',
     'gap_analysis',
     'test_plan_generation',
-    'gpt-4',
+    'gpt-4-turbo',
     'You are a Gap Analysis Agent specialized in identifying missing requirements and test coverage gaps.
 
 Your role is to ensure:
@@ -263,7 +263,7 @@ IDENTIFY GAPS:
 3. Edge cases not addressed
 4. Recommended additions',
     0.5,
-    3000,
+    2000,
     TRUE,
     TRUE,
     'system',
@@ -287,7 +287,7 @@ INSERT INTO compliance_agents (
     'Compliance Checker (Document Analysis)',
     'compliance',
     'document_analysis',
-    'gpt-4',
+    'gpt-4-turbo',
     'You are a compliance verification expert specializing in analyzing technical documents, standards, and requirements.
 
 Your role is to carefully evaluate whether the provided content meets specified requirements, identify compliance issues, and provide detailed analysis.',
@@ -334,7 +334,7 @@ Provide a thorough evaluation of the content, including:
     'Requirements Extractor (Document Analysis)',
     'custom',
     'document_analysis',
-    'gpt-4',
+    'gpt-4-turbo',
     'You are an expert at extracting and analyzing requirements from technical documents, specifications, and standards.
 
 Your role is to identify explicit and implicit requirements, categorize them, and present them in a structured format.',
@@ -373,7 +373,7 @@ Provide your analysis in the following format:
 - Highlight any ambiguous or unclear requirements
 - Identify dependencies between requirements',
     0.5,
-    2500,
+    2000,
     TRUE,
     TRUE,
     'system',

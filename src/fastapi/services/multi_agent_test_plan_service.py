@@ -117,6 +117,72 @@ class MultiAgentTestPlanService:
         except Exception as e:
             logger.error(f"Redis connection failed: {e}")
 
+    def _calculate_safe_max_tokens(
+        self,
+        model_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        requested_max_tokens: int
+    ) -> int:
+        """
+        Calculate safe max_tokens based on model context window and input size.
+
+        Prevents context length errors by dynamically adjusting max_tokens
+        based on the actual input size.
+
+        Args:
+            model_name: Name of the LLM model
+            system_prompt: System prompt text
+            user_prompt: User prompt text
+            requested_max_tokens: Original requested max_tokens
+
+        Returns:
+            Adjusted max_tokens that won't exceed context window
+        """
+        # Model context windows (tokens)
+        MODEL_CONTEXT_LIMITS = {
+            'gpt-4': 8192,
+            'gpt-4-0613': 8192,
+            'gpt-4-32k': 32768,
+            'gpt-4-32k-0613': 32768,
+            'gpt-4-turbo': 128000,
+            'gpt-4-turbo-preview': 128000,
+            'gpt-4-1106-preview': 128000,
+            'gpt-4o': 128000,
+            'gpt-3.5-turbo': 16385,
+            'gpt-3.5-turbo-16k': 16385,
+        }
+
+        # Get model context limit (default to 8192 for unknown models)
+        context_limit = MODEL_CONTEXT_LIMITS.get(model_name, 8192)
+
+        # Estimate token count (rough approximation: 4 characters per token)
+        # For production, consider using tiktoken for accurate counting
+        try:
+            import tiktoken
+            encoding = tiktoken.encoding_for_model(model_name if model_name in MODEL_CONTEXT_LIMITS else 'gpt-4')
+            input_tokens = len(encoding.encode(system_prompt + user_prompt))
+        except (ImportError, Exception) as e:
+            # Fallback to character-based estimation
+            total_chars = len(system_prompt) + len(user_prompt)
+            input_tokens = total_chars // 4
+            logger.debug(f"Using character-based token estimation: {input_tokens} tokens (tiktoken not available)")
+
+        # Reserve safety margin (100 tokens for overhead)
+        safety_margin = 100
+        available_tokens = context_limit - input_tokens - safety_margin
+
+        # Return the minimum of requested tokens and available tokens
+        safe_max_tokens = min(requested_max_tokens, max(available_tokens, 100))
+
+        logger.debug(
+            f"Token calculation: model={model_name}, context_limit={context_limit}, "
+            f"input_tokens={input_tokens}, requested={requested_max_tokens}, "
+            f"safe={safe_max_tokens}"
+        )
+
+        return safe_max_tokens
+
     def _load_agent_set_configuration(self, agent_set_id: int) -> Optional[Dict[str, Any]]:
         """
         Load agent set configuration from database
@@ -228,14 +294,26 @@ class MultiAgentTestPlanService:
             # Execute agent via LLM service
             logger.info(f"Executing agent: {agent_name} (ID: {agent_id}, Type: {agent_type}, Model: {agent_model_name})")
 
-            
+            # Dynamic token limit adjustment to prevent context length errors
+            adjusted_max_tokens = self._calculate_safe_max_tokens(
+                model_name=agent_model_name,
+                system_prompt=agent_system_prompt,
+                user_prompt=user_prompt,
+                requested_max_tokens=agent_max_tokens
+            )
+
+            if adjusted_max_tokens < agent_max_tokens:
+                logger.warning(
+                    f"Agent {agent_id} max_tokens reduced from {agent_max_tokens} to {adjusted_max_tokens} "
+                    f"to prevent context length error (input is large)"
+                )
 
             response = LLMInvoker.invoke(
                 model_name=agent_model_name,
                 prompt=user_prompt,
                 system_prompt=agent_system_prompt,
                 temperature=agent_temperature,
-                max_tokens=agent_max_tokens
+                max_tokens=adjusted_max_tokens
             )
 
             processing_time = time.time() - start_time
@@ -353,7 +431,8 @@ class MultiAgentTestPlanService:
                                      source_collections: List[str],
                                      source_doc_ids: List[str],
                                      doc_title: str = "Test Plan",
-                                     agent_set_id: int = None) -> FinalTestPlan:
+                                     agent_set_id: int = None,
+                                     pipeline_id: str = None) -> FinalTestPlan:
         """
         Main entry point for multi-agent test plan generation
 
@@ -373,8 +452,9 @@ class MultiAgentTestPlanService:
         if agent_set_id is None:
             raise ValueError("agent_set_id is required. Please select an agent set from the Agent Set Manager.")
 
-        # Generate unique pipeline ID for this run
-        pipeline_id = f"pipeline_{uuid.uuid4().hex[:12]}"
+        # Use provided pipeline_id or generate unique one
+        if pipeline_id is None:
+            pipeline_id = f"pipeline_{uuid.uuid4().hex[:12]}"
 
         # Load agent set configuration
         logger.info(f"Using agent set ID: {agent_set_id}")
@@ -400,7 +480,7 @@ class MultiAgentTestPlanService:
             
             # 3. Mark pipeline as processing
             try:
-                self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                self._update_pipeline_metadata(pipeline_id, {
                     "status": "PROCESSING"
                 })
                 self.redis_client.zadd("pipeline:processing", {pipeline_id: time.time()})
@@ -414,7 +494,7 @@ class MultiAgentTestPlanService:
             # If aborted, do not run final critic; return partial/aborted plan
             if self._is_aborted(pipeline_id):
                 logger.warning(f"Pipeline {pipeline_id} aborted; skipping final critic")
-                self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                self._update_pipeline_metadata(pipeline_id, {
                     "status": "ABORTED",
                     "completed_at": datetime.now().isoformat(),
                 })
@@ -457,7 +537,7 @@ class MultiAgentTestPlanService:
             logger.error(f"Multi-agent test plan generation failed: {e}")
             self._cleanup_pipeline(pipeline_id)
             try:
-                self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                self._update_pipeline_metadata(pipeline_id, {
                     "status": "FAILED",
                     "error": str(e)
                 })
@@ -683,17 +763,28 @@ class MultiAgentTestPlanService:
     
     def _initialize_pipeline(self, pipeline_id: str, sections: Dict[str, str], doc_title: str):
         """Initialize Redis pipeline with sections and metadata"""
+        # Get existing metadata (if created by API endpoint)
+        existing_meta = self.redis_client.hgetall(f"pipeline:{pipeline_id}:meta") or {}
+
+        # Update with initialization data (preserve existing fields like agent_set_name)
+        now = datetime.now().isoformat()
         pipeline_data = {
-            "id": pipeline_id,
-            "title": doc_title,
+            "pipeline_id": pipeline_id,
+            "doc_title": doc_title,
             "status": "INITIALIZING",
             "total_sections": len(sections),
             "sections_processed": 0,
-            "created_at": datetime.now().isoformat(),
+            "created_at": existing_meta.get("created_at", now),
+            "last_updated_at": now,
+            "progress_message": f"Initializing pipeline with {len(sections)} sections...",
             "actor_agents": len(self.actor_models)
         }
-        
-        # Store pipeline metadata
+
+        # Preserve agent_set_name if it was already set
+        if "agent_set_name" in existing_meta:
+            pipeline_data["agent_set_name"] = existing_meta["agent_set_name"]
+
+        # Store pipeline metadata (merge with existing)
         self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping=pipeline_data)
         # Track recent pipelines for quick listing in UI
         try:
@@ -886,7 +977,12 @@ class MultiAgentTestPlanService:
             return self.redis_client.get(f"pipeline:{pipeline_id}:abort") == "1"
         except Exception:
             return False
-    
+
+    def _update_pipeline_metadata(self, pipeline_id: str, updates: dict):
+        """Update pipeline metadata with automatic timestamp update"""
+        updates["last_updated_at"] = datetime.now().isoformat()
+        self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping=updates)
+
     def _run_actor_agents(self, section_title: str, section_content: str) -> List[ActorResult]:
         """Run multiple GPT-4 actor agents in parallel for a section"""
         actor_results = []
@@ -1189,7 +1285,7 @@ Create a comprehensive markdown document that consolidates all {len(section_resu
             self.redis_client.hset(final_result_key, mapping=final_data)
             # Update pipeline meta status and bump recency
             try:
-                self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                self._update_pipeline_metadata(pipeline_id, {
                     "status": "COMPLETED",
                     "completed_at": final_data["completed_at"],
                 })
@@ -1404,7 +1500,7 @@ Create a comprehensive markdown document that consolidates all {len(section_resu
             self.critic_model = fallback_model
             self.final_critic_model = fallback_model
             # Record in Redis
-            self.redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+            self._update_pipeline_metadata(pipeline_id, {
                 "model_fallback": fallback_model,
                 "fallback_reason": reason,
                 "original_actor_models": json.dumps(self._original_actor_models),
@@ -1601,7 +1697,7 @@ This test plan was generated in fallback mode due to section extraction issues.
                 # Record generated doc in pipeline meta if pipeline_id provided
                 try:
                     if pid:
-                        self.redis_client.hset(f"pipeline:{pid}:meta", mapping={
+                        self._update_pipeline_metadata(pid, {
                             "generated_document_id": doc_id,
                             "collection": target_collection,
                         })

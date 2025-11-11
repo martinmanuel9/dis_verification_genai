@@ -555,6 +555,7 @@ class DocumentService:
         source_doc_ids: Optional[List[str]] = None,
         doc_title: Optional[str] = None,
         agent_set_id: int = None,
+        pipeline_id: str = None,
     ) -> List[dict]:
         """
         Generate test plan using multi-agent architecture:
@@ -578,7 +579,8 @@ class DocumentService:
                 source_collections=source_collections or [],
                 source_doc_ids=source_doc_ids or [],
                 doc_title=doc_title or "Test Plan",
-                agent_set_id=agent_set_id
+                agent_set_id=agent_set_id,
+                pipeline_id=pipeline_id
             )
             
             print(f"Multi-agent pipeline generated: {test_plan_result.total_requirements} requirements, {test_plan_result.total_test_procedures} procedures from {test_plan_result.total_sections} sections")
@@ -598,6 +600,7 @@ class DocumentService:
             
             return [{
                 "title": test_plan_result.title,
+                "content": test_plan_result.consolidated_markdown,
                 "docx_b64": docx_b64,
                 "document_id": chromadb_result.get("document_id"),
                 "collection_name": chromadb_result.get("collection_name"),
@@ -612,7 +615,8 @@ class DocumentService:
                     "redis_pipeline": True,
                     "scalable_processing": True,
                     "chromadb_saved": chromadb_result.get("saved", False),
-                    "sections_processed": len(test_plan_result.sections)
+                    "sections_processed": len(test_plan_result.sections),
+                    "pipeline_id": pipeline_id
                 }
             }]
             

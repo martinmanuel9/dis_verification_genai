@@ -47,6 +47,12 @@ MODEL_REGISTRY: Dict[str, ModelConfig] = {
         description="Fast and cost-effective model for general tasks and conversations",
         provider="openai",
     ),
+    "gpt-4-turbo": ModelConfig(
+        model_id="gpt-4-turbo",
+        display_name="GPT-4-Turbo",
+        description="Faster and cheaper variant of GPT-4 for scalable applications",
+        provider="openai",
+    ),
 
     # --- Anthropic Models ---
     # "claude-3-5-haiku-20241022": ModelConfig(

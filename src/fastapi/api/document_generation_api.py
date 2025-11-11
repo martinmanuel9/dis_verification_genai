@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import requests
 from typing import Optional, List
 from pydantic import BaseModel
 from repositories.chromadb_repository  import document_service_dep
+from services.generate_docs_service import DocumentService
 # New dependency injection imports
 from core.dependencies import get_db, get_db_session, get_chat_repository
 from repositories import ChatRepository
@@ -24,6 +25,7 @@ import uuid
 import base64
 import redis
 from datetime import datetime
+import asyncio
 from schemas.test_card import (
     TestCardRequest,
     TestCardResponse,
@@ -56,8 +58,36 @@ class GenerateRequest(BaseModel):
 @doc_gen_api_router.post("/generate_documents")
 async def generate_documents(
     req: GenerateRequest,
-    doc_service: document_service_dep = Depends(document_service_dep)):
+    doc_service: DocumentService = Depends(document_service_dep),
+    db: Session = Depends(get_db)):
     logger.info("Received /generate_documents ⇒ %s", req)
+
+    # Validate agent_set_id is provided
+    if req.agent_set_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="agent_set_id is required. Please select an agent set from the Agent Set Manager or use the default 'Standard Test Plan Pipeline'."
+        )
+
+    # Validate agent set exists and is active
+    from repositories.agent_set_repository import AgentSetRepository
+    agent_set_repo = AgentSetRepository()
+    agent_set = agent_set_repo.get_by_id(req.agent_set_id, db)
+
+    if not agent_set:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent set with ID {req.agent_set_id} not found. Please create an agent set or use the default 'Standard Test Plan Pipeline' (ID: 1)."
+        )
+
+    if not agent_set.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent set '{agent_set.name}' (ID: {req.agent_set_id}) is inactive. Please select an active agent set."
+        )
+
+    logger.info(f"Using agent set: {agent_set.name} (ID: {req.agent_set_id})")
+
     # Note: DocumentService.generate_test_plan is now used for document generation
     # The additional parameters in GenerateRequest are preserved for backward compatibility
     # but are not currently used by the underlying service
@@ -81,8 +111,9 @@ class OptimizedTestPlanRequest(BaseModel):
 
 @doc_gen_api_router.post("/generate_optimized_test_plan")
 async def generate_optimized_test_plan(
-    req: OptimizedTestPlanRequest, 
-    doc_service: document_service_dep = Depends(document_service_dep)):
+    req: OptimizedTestPlanRequest,
+    doc_service: DocumentService = Depends(document_service_dep),
+    db: Session = Depends(get_db)):
     """
     Generate test plan using the new optimized multi-agent workflow:
     1. Extract rules/requirements per section with caching
@@ -92,7 +123,33 @@ async def generate_optimized_test_plan(
     5. O(log n) performance optimization
     """
     logger.info("Received /generate_optimized_test_plan ⇒ %s", req)
-    
+
+    # Validate agent_set_id is provided
+    if req.agent_set_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="agent_set_id is required. Please select an agent set from the Agent Set Manager or use the default 'Standard Test Plan Pipeline'."
+        )
+
+    # Validate agent set exists and is active
+    from repositories.agent_set_repository import AgentSetRepository
+    agent_set_repo = AgentSetRepository()
+    agent_set = agent_set_repo.get_by_id(req.agent_set_id, db)
+
+    if not agent_set:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent set with ID {req.agent_set_id} not found. Please create an agent set or use the default 'Standard Test Plan Pipeline' (ID: 1)."
+        )
+
+    if not agent_set.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent set '{agent_set.name}' (ID: {req.agent_set_id}) is inactive. Please select an active agent set."
+        )
+
+    logger.info(f"Using agent set: {agent_set.name} (ID: {req.agent_set_id})")
+
     try:
         docs = await run_in_threadpool(
             doc_service.generate_test_plan,
@@ -105,7 +162,475 @@ async def generate_optimized_test_plan(
     except Exception as e:
         logger.error(f"Error in optimized test plan generation: {e}")
         raise HTTPException(status_code=500, detail=f"Test plan generation failed: {str(e)}")
-    
+
+
+# ============================================================================
+# BACKGROUND TASK ENDPOINTS (No Timeout)
+# ============================================================================
+
+def _run_generation_background(
+    source_collections: List[str],
+    source_doc_ids: List[str],
+    doc_title: str,
+    agent_set_id: int,
+    doc_service: DocumentService,
+    pipeline_id: str
+):
+    """
+    Background task for document generation.
+
+    Note: Pipeline ID is generated upfront by the API endpoint and passed through
+    to the service to ensure single pipeline creation.
+    """
+    try:
+        logger.info(f"Background generation started for: {doc_title} (pipeline: {pipeline_id})")
+
+        # Run generation (this can take 20+ minutes)
+        # Pass pipeline_id to service so it uses our pre-generated ID
+        docs = doc_service.generate_test_plan(
+            source_collections,
+            source_doc_ids,
+            doc_title,
+            agent_set_id,
+            pipeline_id
+        )
+
+        if docs and len(docs) > 0:
+            doc = docs[0]
+            meta = doc.get("meta", {})
+
+            logger.info(f"Background generation completed: {pipeline_id}")
+            logger.info(f"Generated {meta.get('total_sections', 0)} sections, "
+                       f"{meta.get('total_requirements', 0)} requirements, "
+                       f"{meta.get('total_test_procedures', 0)} test procedures")
+            logger.info(f"ChromaDB saved: {meta.get('chromadb_saved', False)}, "
+                       f"Document ID: {doc.get('document_id', 'N/A')}")
+
+            # Save result to Redis for retrieval
+            redis_host = os.getenv("REDIS_HOST", "redis")
+            redis_port = int(os.getenv("REDIS_PORT", 6379))
+            redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+            result_data = {
+                "title": doc.get("title", ""),
+                "content": doc.get("content", ""),
+                "docx_b64": doc.get("docx_b64", ""),
+                "total_sections": str(meta.get("total_sections", 0)),
+                "total_requirements": str(meta.get("total_requirements", 0)),
+                "total_test_procedures": str(meta.get("total_test_procedures", 0)),
+                "document_id": doc.get("document_id", ""),
+                "collection_name": doc.get("collection_name", ""),
+                "generated_at": doc.get("generated_at", ""),
+                "chromadb_saved": str(meta.get("chromadb_saved", False))
+            }
+
+            # Save result to Redis
+            redis_client.hset(f"pipeline:{pipeline_id}:result", mapping=result_data)
+            redis_client.expire(f"pipeline:{pipeline_id}:result", 604800)  # 7 days
+
+            # Update status to completed
+            now = datetime.now().isoformat()
+            redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                "status": "completed",
+                "completed_at": now,
+                "last_updated_at": now,
+                "progress_message": "Generation completed successfully"
+            })
+
+            logger.info(f"Result saved to Redis for pipeline {pipeline_id}")
+            return doc
+        else:
+            raise ValueError("No documents generated")
+
+    except Exception as e:
+        logger.error(f"Background generation failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # Mark pipeline as failed in Redis
+        try:
+            redis_host = os.getenv("REDIS_HOST", "redis")
+            redis_port = int(os.getenv("REDIS_PORT", 6379))
+            redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+            now = datetime.now().isoformat()
+            redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                "status": "failed",
+                "error": str(e),
+                "failed_at": now,
+                "last_updated_at": now,
+                "progress_message": f"Generation failed: {str(e)}"
+            })
+        except Exception as redis_error:
+            logger.error(f"Failed to update Redis with error status: {redis_error}")
+
+        raise
+
+
+@doc_gen_api_router.post("/generate_documents_async")
+async def generate_documents_async(
+    req: GenerateRequest,
+    background_tasks: BackgroundTasks,
+    doc_service: DocumentService = Depends(document_service_dep),
+    db: Session = Depends(get_db)):
+    """
+    Start document generation as a background task (no timeout).
+    Returns pipeline_id immediately for progress tracking.
+    """
+    logger.info("Received /generate_documents_async ⇒ %s", req)
+
+    # Validate agent_set_id is provided
+    if req.agent_set_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="agent_set_id is required. Please select an agent set from the Agent Set Manager or use the default 'Standard Test Plan Pipeline'."
+        )
+
+    # Validate agent set exists and is active
+    from repositories.agent_set_repository import AgentSetRepository
+    agent_set_repo = AgentSetRepository()
+    agent_set = agent_set_repo.get_by_id(req.agent_set_id, db)
+
+    if not agent_set:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent set with ID {req.agent_set_id} not found. Please create an agent set or use the default 'Standard Test Plan Pipeline' (ID: 1)."
+        )
+
+    if not agent_set.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent set '{agent_set.name}' (ID: {req.agent_set_id}) is inactive. Please select an active agent set."
+        )
+
+    logger.info(f"Using agent set: {agent_set.name} (ID: {req.agent_set_id})")
+
+    # Generate pipeline_id upfront so we can return it immediately
+    pipeline_id = f"pipeline_{uuid.uuid4().hex[:12]}"
+
+    # Initialize pipeline metadata in Redis immediately (so UI can check status)
+    redis_host = os.getenv("REDIS_HOST", "redis")
+    redis_port = int(os.getenv("REDIS_PORT", 6379))
+    redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+    now = datetime.now().isoformat()
+    pipeline_meta = {
+        "pipeline_id": pipeline_id,
+        "doc_title": req.doc_title or "Test Plan",
+        "agent_set_name": agent_set.name,
+        "status": "queued",
+        "created_at": now,
+        "last_updated_at": now,
+        "progress_message": "Generation queued - waiting to start..."
+    }
+    redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping=pipeline_meta)
+    redis_client.expire(f"pipeline:{pipeline_id}:meta", 604800)  # 7 days
+
+    # Add background task - pass pipeline_id so service uses it
+    background_tasks.add_task(
+        _run_generation_background,
+        req.source_collections,
+        req.source_doc_ids,
+        req.doc_title,
+        req.agent_set_id,
+        doc_service,
+        pipeline_id  # Pass to service so it doesn't create another one
+    )
+
+    logger.info(f"Background task queued: {pipeline_id}")
+
+    # Return immediately - pipeline metadata already created
+    return {
+        "pipeline_id": pipeline_id,
+        "status": "queued",
+        "message": "Document generation started in background. Use /generation-status/{pipeline_id} to check progress.",
+        "doc_title": req.doc_title or "Test Plan",
+        "agent_set_name": agent_set.name
+    }
+
+
+@doc_gen_api_router.get("/generation-status/{pipeline_id}")
+async def get_generation_status(pipeline_id: str):
+    """Get the status of a document generation pipeline"""
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Get metadata
+        meta = redis_client.hgetall(f"pipeline:{pipeline_id}:meta")
+
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or expired")
+
+        # Get additional progress info if available
+        progress_info = {
+            "pipeline_id": pipeline_id,
+            "status": meta.get("status", "unknown"),
+            "doc_title": meta.get("doc_title", ""),
+            "agent_set_name": meta.get("agent_set_name", ""),
+            "created_at": meta.get("created_at", ""),
+            "progress_message": meta.get("progress_message", ""),
+            "sections_processed": meta.get("sections_processed", "0"),
+            "total_sections": meta.get("total_sections", "0")
+        }
+
+        # If failed, include error
+        if meta.get("status") == "failed":
+            progress_info["error"] = meta.get("error", "Unknown error")
+
+        # If completed, check if result is available
+        if meta.get("status") == "completed":
+            result_exists = redis_client.exists(f"pipeline:{pipeline_id}:result")
+            progress_info["result_available"] = bool(result_exists)
+            progress_info["completed_at"] = meta.get("completed_at", "")
+
+        return progress_info
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking status for {pipeline_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.get("/generation-result/{pipeline_id}")
+async def get_generation_result(pipeline_id: str):
+    """Get the completed document from a generation pipeline"""
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Check status first
+        meta = redis_client.hgetall(f"pipeline:{pipeline_id}:meta")
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or expired")
+
+        status = meta.get("status", "")
+        if status != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Pipeline is not completed yet. Current status: {status}"
+            )
+
+        # Get result
+        result = redis_client.hgetall(f"pipeline:{pipeline_id}:result")
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Result for pipeline {pipeline_id} not found or expired")
+
+        return {
+            "documents": [{
+                "title": result.get("title", ""),
+                "content": result.get("content", ""),
+                "docx_b64": result.get("docx_b64", ""),
+                "total_sections": int(result.get("total_sections", 0)),
+                "total_requirements": int(result.get("total_requirements", 0)),
+                "total_test_procedures": int(result.get("total_test_procedures", 0)),
+                "pipeline_id": pipeline_id
+            }]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving result for {pipeline_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.get("/list-pipelines")
+async def list_pipelines(limit: int = 50):
+    """List all active and recent pipelines"""
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Get all pipeline metadata keys
+        pipeline_keys = redis_client.keys("pipeline:*:meta")
+
+        pipelines = []
+        for key in pipeline_keys[:limit]:
+            # Extract pipeline_id from key (format: pipeline:PIPELINE_ID:meta)
+            pipeline_id = key.replace("pipeline:", "").replace(":meta", "")
+
+            # Get metadata
+            meta = redis_client.hgetall(key)
+
+            if meta:
+                # Check if result exists
+                result_exists = redis_client.exists(f"pipeline:{pipeline_id}:result")
+
+                pipelines.append({
+                    "pipeline_id": pipeline_id,
+                    "status": meta.get("status", "unknown"),
+                    "doc_title": meta.get("doc_title", "Untitled"),
+                    "agent_set_name": meta.get("agent_set_name", ""),
+                    "created_at": meta.get("created_at", ""),
+                    "progress_message": meta.get("progress_message", ""),
+                    "result_available": bool(result_exists)
+                })
+
+        # Sort by created_at descending (most recent first)
+        pipelines.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+        return {
+            "pipelines": pipelines,
+            "total": len(pipelines)
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing pipelines: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.post("/cancel-pipeline/{pipeline_id}")
+async def cancel_pipeline(pipeline_id: str):
+    """
+    Cancel/abort a running pipeline.
+
+    Sets the abort flag - the pipeline will stop at the next checkpoint
+    and return partial results.
+    """
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Check if pipeline exists
+        meta = redis_client.hgetall(f"pipeline:{pipeline_id}:meta")
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or expired")
+
+        current_status = meta.get("status", "")
+
+        # Can only cancel queued or processing pipelines
+        if current_status not in ["queued", "processing"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel pipeline with status '{current_status}'. Only queued or processing pipelines can be cancelled."
+            )
+
+        # Set abort flag
+        redis_client.set(f"pipeline:{pipeline_id}:abort", "1", ex=60 * 60 * 24)  # 24 hour expiry
+
+        # Update metadata
+        redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+            "status": "cancelling",
+            "progress_message": "Cancellation requested - stopping at next checkpoint..."
+        })
+
+        logger.info(f"Cancellation requested for pipeline {pipeline_id}")
+
+        return {
+            "pipeline_id": pipeline_id,
+            "message": "Cancellation requested. Pipeline will stop at next checkpoint and return partial results.",
+            "previous_status": current_status,
+            "new_status": "cancelling"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling pipeline {pipeline_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.post("/cleanup-stale-pipelines")
+async def cleanup_stale_pipelines(max_age_minutes: int = 30):
+    """
+    Detect and mark stale pipelines as failed.
+
+    A pipeline is considered stale if:
+    - Status is "queued", "processing", or "initializing"
+    - last_updated_at is more than max_age_minutes ago
+
+    This handles cases where background tasks died (container restart, crash, etc.)
+    """
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Get all pipeline metadata keys
+        pipeline_keys = redis_client.keys("pipeline:*:meta")
+
+        stale_pipelines = []
+        now = datetime.now()
+
+        for key in pipeline_keys:
+            try:
+                meta = redis_client.hgetall(key)
+                if not meta:
+                    continue
+
+                status = meta.get("status", "")
+                status_lower = status.lower()
+                last_updated_str = meta.get("last_updated_at", "")
+                pipeline_id = meta.get("pipeline_id", key.split(":")[1])
+
+                # Only check active pipelines
+                if status_lower not in ["queued", "processing", "initializing"]:
+                    continue
+
+                # Check if last_updated_at exists and parse it
+                if not last_updated_str:
+                    # No timestamp - assume it's stale and mark as failed
+                    logger.warning(f"Pipeline {pipeline_id} has no last_updated_at timestamp - marking as stale")
+                    stale_pipelines.append(pipeline_id)
+
+                    failed_at = datetime.now().isoformat()
+                    redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                        "status": "failed",
+                        "error": "Pipeline stale - missing last_updated_at timestamp (likely from before stale detection was implemented)",
+                        "failed_at": failed_at,
+                        "last_updated_at": failed_at,
+                        "progress_message": "Pipeline marked as failed - no timestamp"
+                    })
+                    continue
+
+                try:
+                    last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                    # Remove timezone info for comparison
+                    if last_updated.tzinfo:
+                        last_updated = last_updated.replace(tzinfo=None)
+
+                    age_minutes = (now - last_updated).total_seconds() / 60
+
+                    if age_minutes > max_age_minutes:
+                        logger.warning(f"Pipeline {pipeline_id} is stale ({age_minutes:.1f} minutes old)")
+                        stale_pipelines.append(pipeline_id)
+
+                        # Mark as failed
+                        failed_at = datetime.now().isoformat()
+                        redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+                            "status": "failed",
+                            "error": f"Pipeline stale - no updates for {age_minutes:.1f} minutes (likely died due to container restart)",
+                            "failed_at": failed_at,
+                            "last_updated_at": failed_at,
+                            "progress_message": f"Pipeline marked as failed - stale for {age_minutes:.1f} minutes"
+                        })
+
+                except (ValueError, AttributeError) as e:
+                    logger.error(f"Failed to parse timestamp for pipeline {pipeline_id}: {e}")
+                    stale_pipelines.append(pipeline_id)
+
+            except Exception as e:
+                logger.error(f"Error checking pipeline {key}: {e}")
+                continue
+
+        return {
+            "stale_pipelines_found": len(stale_pipelines),
+            "stale_pipeline_ids": stale_pipelines,
+            "max_age_minutes": max_age_minutes,
+            "checked_at": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error during stale pipeline cleanup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class PreviewRequest(BaseModel):
     source_collections:   Optional[List[str]]   = None
     source_doc_ids:       Optional[List[str]]   = None
@@ -118,7 +643,7 @@ class PreviewRequest(BaseModel):
 @doc_gen_api_router.post("/preview-sections")
 async def preview_sections(
     req: PreviewRequest,
-    doc_service: document_service_dep = Depends(document_service_dep)):
+    doc_service: DocumentService = Depends(document_service_dep)):
     try:    
         sections = await run_in_threadpool(
             doc_service._extract_document_sections,

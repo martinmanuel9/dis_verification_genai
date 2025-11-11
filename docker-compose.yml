@@ -95,6 +95,11 @@ services:
     volumes:
       - ./src/llm_config:/app/llm_config:ro
       - ./stored_images:/app/stored_images:ro
+      - ./src/streamlit/components:/app/components
+      - ./src/streamlit/pages:/app/pages
+      - ./src/streamlit/services:/app/services
+      - ./src/streamlit/lib:/app/lib
+      - ./src/streamlit/config:/app/config
     networks:
       - ai_network
 

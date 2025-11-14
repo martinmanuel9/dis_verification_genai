@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import os
 
 
@@ -12,6 +12,10 @@ class ModelConfig:
     display_name: str
     description: str
     provider: str  # e.g. "openai", "anthropic"
+    supports_temperature: bool = True  # Whether model supports temperature parameter
+    supports_max_tokens: bool = True  # Whether model supports max_tokens parameter
+    default_temperature: Optional[float] = None  # Model-specific default temperature (None = use global default)
+    max_context_tokens: Optional[int] = None  # Maximum context window size
 
     def __hash__(self):
         return hash(self.model_id)
@@ -23,63 +27,209 @@ class ModelConfig:
 
 MODEL_REGISTRY: Dict[str, ModelConfig] = {
     # --- OpenAI Models ---
+    "gpt-5.1": ModelConfig(
+        model_id="gpt-5.1",
+        display_name="GPT-5.1",
+        description="Next-generation GPT-5.1 model with advanced reasoning and creativity capabilities",
+        provider="openai",
+        max_context_tokens=256000,
+    ),
+    "gpt-5": ModelConfig(
+        model_id="gpt-5",
+        display_name="GPT-5",
+        description="State-of-the-art GPT-5 model for unparalleled performance in diverse tasks",
+        provider="openai",
+        max_context_tokens=256000,
+    ),
+    "gpt-5-mini": ModelConfig(
+        model_id="gpt-5-mini",
+        display_name="GPT-5 Mini",
+        description="Compact GPT-5 variant optimized for efficiency and cost-effectiveness",
+        provider="openai",
+        max_context_tokens=256000,
+    ),
+    "gpt-5-nano": ModelConfig(
+        model_id="gpt-5-nano",
+        display_name="GPT-5 Nano",
+        description="Ultra-lightweight GPT-5 model for rapid inference and minimal resource usage",
+        provider="openai",
+        max_context_tokens=256000,
+    ),
+    "gpt-4.1": ModelConfig(
+        model_id="gpt-4.1",
+        display_name="GPT-4.1",
+        description="Enhanced GPT-4 model with improved contextual understanding and generation quality",
+        provider="openai",
+        max_context_tokens=128000,
+    ),
     "gpt-4": ModelConfig(
         model_id="gpt-4",
         display_name="GPT-4",
         description="Most capable GPT-4 model for complex analysis and reasoning tasks",
         provider="openai",
+        max_context_tokens=8192,
     ),
     "gpt-4o": ModelConfig(
         model_id="gpt-4o",
         display_name="GPT-4o",
         description="Flagship multimodal OpenAI model with improved speed, cost, and vision support",
         provider="openai",
+        max_context_tokens=128000,
     ),
     "gpt-4o-mini": ModelConfig(
         model_id="gpt-4o-mini",
         display_name="GPT-4o Mini",
         description="Lightweight GPT-4o variant optimized for cost-effective, high-volume workloads",
         provider="openai",
+        max_context_tokens=128000,
     ),
     "gpt-3.5-turbo": ModelConfig(
         model_id="gpt-3.5-turbo",
         display_name="GPT-3.5-Turbo",
         description="Fast and cost-effective model for general tasks and conversations",
         provider="openai",
+        max_context_tokens=16385,
     ),
     "gpt-4-turbo": ModelConfig(
         model_id="gpt-4-turbo",
         display_name="GPT-4-Turbo",
         description="Faster and cheaper variant of GPT-4 for scalable applications",
         provider="openai",
+        max_context_tokens=128000,
+    ),
+    # OpenAI Reasoning Models (o-series) - Do NOT support temperature parameter
+    "o1": ModelConfig(
+        model_id="o1",
+        display_name="OpenAI o1",
+        description="Advanced reasoning model optimized for complex problem-solving (no temperature control)",
+        provider="openai",
+        supports_temperature=False,  # o1 models don't support temperature
+        default_temperature=1.0,  # Fixed temperature
+        max_context_tokens=200000,
+    ),
+    "o1-mini": ModelConfig(
+        model_id="o1-mini",
+        display_name="OpenAI o1-mini",
+        description="Efficient reasoning model for faster inference (no temperature control)",
+        provider="openai",
+        supports_temperature=False,  # o1 models don't support temperature
+        default_temperature=1.0,  # Fixed temperature
+        max_context_tokens=128000,
+    ),
+    "o3-mini": ModelConfig(
+        model_id="o3-mini",
+        display_name="OpenAI o3-mini",
+        description="Latest reasoning model with improved capabilities (no temperature control)",
+        provider="openai",
+        supports_temperature=False,  # o3 models don't support temperature
+        default_temperature=1.0,  # Fixed temperature
+        max_context_tokens=200000,
     ),
 
     # --- Anthropic Models ---
+    # "claude-3-5-sonnet-20241022": ModelConfig(
+    #     model_id="claude-3-5-sonnet-20241022",
+    #     display_name="Claude 3.5 Sonnet",
+    #     description="Latest Claude 3.5 Sonnet with improved performance and capabilities",
+    #     provider="anthropic",
+    #     max_context_tokens=200000,
+    # ),
     # "claude-3-5-haiku-20241022": ModelConfig(
     #     model_id="claude-3-5-haiku-20241022",
     #     display_name="Claude 3.5 Haiku",
     #     description="Latest Claude 3.5 Haiku with improved latency and translation capabilities",
     #     provider="anthropic",
-    # ),
-    # "claude-3-haiku-20240307": ModelConfig(
-    #     model_id="claude-3-haiku-20240307",
-    #     display_name="Claude 3 Haiku",
-    #     description="Fast Claude model optimized for quick responses and efficiency",
-    #     provider="anthropic",
+    #     max_context_tokens=200000,
     # ),
     # "claude-3-opus-20240229": ModelConfig(
     #     model_id="claude-3-opus-20240229",
     #     display_name="Claude 3 Opus",
     #     description="Anthropic's most capable Claude model for rigorous reasoning and complex drafting",
     #     provider="anthropic",
+    #     max_context_tokens=200000,
     # ),
 
-    # --- Ollama Local Models (CPU-optimized, Minimal Memory Footprint) ---
+    # --- Ollama Local Models (US-Based Organizations Only) ---
+    # All models below are from US-based organizations and run completely on-premises
+
+    # Meta (US - California) - Llama 3.2 Series
     "llama3.2:1b": ModelConfig(
         model_id="llama3.2:1b",
         display_name="Llama 3.2 1B (Local)",
         description="Meta's smallest Llama model - Ultra-lightweight, CPU-optimized (1GB RAM, 1.3GB disk)",
         provider="ollama",
+        max_context_tokens=128000,
+    ),
+    "llama3.2:3b": ModelConfig(
+        model_id="llama3.2:3b",
+        display_name="Llama 3.2 3B (Local)",
+        description="Meta's balanced Llama 3.2 model - Good performance with reasonable resources (2GB disk)",
+        provider="ollama",
+        max_context_tokens=128000,
+    ),
+
+    # Meta (US - California) - Llama 3.1 Series
+    "llama3.1:8b": ModelConfig(
+        model_id="llama3.1:8b",
+        display_name="Llama 3.1 8B (Local)",
+        description="Meta's powerful 8B model - Excellent for complex tasks (4.7GB disk)",
+        provider="ollama",
+        max_context_tokens=128000,
+    ),
+    # "llama3.1:70b": ModelConfig(
+    #     model_id="llama3.1:70b",
+    #     display_name="Llama 3.1 70B (Local)",
+    #     description="Meta's most capable model - Enterprise-grade performance (40GB disk, requires GPU)",
+    #     provider="ollama",
+    #     max_context_tokens=128000,
+    # ),
+
+    # Meta (US - California) - Llama 3 Series (Previous Generation)
+    # "llama3:8b": ModelConfig(
+    #     model_id="llama3:8b",
+    #     display_name="Llama 3 8B (Local)",
+    #     description="Meta's proven 8B model - Stable and reliable (4.7GB disk)",
+    #     provider="ollama",
+    #     max_context_tokens=8192,
+    # ),
+    # "llama3:70b": ModelConfig(
+    #     model_id="llama3:70b",
+    #     display_name="Llama 3 70B (Local)",
+    #     description="Meta's large-scale model - High performance for critical tasks (40GB disk)",
+    #     provider="ollama",
+    #     max_context_tokens=8192,
+    # ),
+
+    # Microsoft (US - Washington) - Phi Series
+    "phi3:mini": ModelConfig(
+        model_id="phi3:mini",
+        display_name="Phi-3 Mini (Local)",
+        description="Microsoft's efficient small model - Excellent quality-to-size ratio (2.3GB disk)",
+        provider="ollama",
+        max_context_tokens=128000,
+    ),
+    # "phi3:medium": ModelConfig(
+    #     model_id="phi3:medium",
+    #     display_name="Phi-3 Medium (Local)",
+    #     description="Microsoft's medium model - Strong performance for enterprise use (7.9GB disk)",
+    #     provider="ollama",
+    #     max_context_tokens=128000,
+    # ),
+
+    # Snowflake (US - Montana) - Arctic Embed Series
+    # "snowflake-arctic-embed": ModelConfig(
+    #     model_id="snowflake-arctic-embed",
+    #     display_name="Snowflake Arctic Embed (Local)",
+    #     description="Snowflake's embedding model - Optimized for RAG and semantic search",
+    #     provider="ollama",
+    #     max_context_tokens=512,
+    # ),
+    "snowflake-arctic-embed2": ModelConfig(
+        model_id="snowflake-arctic-embed2",
+        display_name="Snowflake Arctic Embed 2.0 (Local)",
+        description="Snowflake's frontier embedding model - Multilingual support with superior English performance",
+        provider="ollama",
+        max_context_tokens=8192,
     ),
 }
 
@@ -214,6 +364,42 @@ def get_anthropic_models() -> List[ModelConfig]:
 def get_model_display_name(model_id: str) -> str:
     """Get display name for a model ID, returns model_id if not found."""
     return MODEL_ID_TO_DISPLAY.get(model_id, model_id)
+
+
+def get_model_capabilities(model_name: str) -> Dict[str, Any]:
+    """
+    Get model capabilities and constraints.
+
+    Args:
+        model_name: Model identifier
+
+    Returns:
+        Dictionary with model capabilities:
+        - supports_temperature: bool
+        - supports_max_tokens: bool
+        - max_context_tokens: int or None
+        - default_temperature: float or None
+
+    Example:
+        >>> caps = get_model_capabilities("o1")
+        >>> print(caps["supports_temperature"])  # False
+        >>> print(caps["max_context_tokens"])  # 200000
+    """
+    config = get_model_config(model_name)
+    if not config:
+        return {
+            "supports_temperature": True,
+            "supports_max_tokens": True,
+            "max_context_tokens": None,
+            "default_temperature": None
+        }
+
+    return {
+        "supports_temperature": config.supports_temperature,
+        "supports_max_tokens": config.supports_max_tokens,
+        "max_context_tokens": config.max_context_tokens,
+        "default_temperature": config.default_temperature
+    }
 
 
 # ============================================================================

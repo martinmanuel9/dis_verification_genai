@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import nest_asyncio
 import torch
+import logging
 
 from config.settings import config
 from config.env import env
@@ -18,6 +19,23 @@ from components.session_history import Session_History
 torch.classes.__path__ = []
 nest_asyncio.apply()
 
+# Configure logging to suppress benign WebSocket errors
+# These errors occur when users refresh/close the page during auto-refresh
+# and are properly handled by Tornado's async exception handler
+class WebSocketErrorFilter(logging.Filter):
+    def filter(self, record):
+        # Suppress WebSocketClosedError and StreamClosedError
+        if 'WebSocketClosedError' in str(record.msg) or 'StreamClosedError' in str(record.msg):
+            return False
+        if 'tornado.websocket' in record.name and 'exception' in str(record.msg).lower():
+            return False
+        return True
+
+# Apply filter to root logger and Streamlit loggers
+for logger_name in ['', 'streamlit', 'tornado.application']:
+    logger = logging.getLogger(logger_name)
+    logger.addFilter(WebSocketErrorFilter())
+
 # Use centralized config instead of duplicate endpoint definitions
 FASTAPI = config.endpoints.base
 CHROMADB_API = config.endpoints.vectordb
@@ -27,7 +45,7 @@ HEALTH_ENDPOINT = config.endpoints.health
 OPEN_AI_API_KEY = env.openai_api_key
 
 # THIS MUST BE THE VERY FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="AI Assistant", layout="wide")
+st.set_page_config(page_title="AI Assistant", layout="wide", page_icon="🤖")
 
 st.title("AI Assistant")
 
@@ -56,7 +74,7 @@ Healthcheck_Sidebar()
 # Chat mode selection
 chat_mode = st.radio(
     "Select Mode:",
-    ["Direct Chat", "AI Agent Simulation", "Agent & Orchestration Manager", "Document Generator", "Test Card Viewer", "Session History"],
+    ["Direct Chat", "AI Agent Simulation", "Agent & Orchestration Manager", "Document Generator", "Test Card Viewer"],
     horizontal=True
 )
 
@@ -98,9 +116,9 @@ elif chat_mode == "Test Card Viewer":
 # ----------------------------------------------------------------------
 # SESSION HISTORY & ANALYTICS MODE
 # ----------------------------------------------------------------------
-elif chat_mode == "Session History":
-    st.markdown("---")
-    Session_History()
+# elif chat_mode == "Session History":
+#     st.markdown("---")
+#     Session_History()
 
 
 # Footer

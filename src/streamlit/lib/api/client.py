@@ -150,12 +150,13 @@ class APIClient:
     def delete(
         self,
         endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
         timeout: int = 30,
         show_errors: bool = True
     ) -> Dict[str, Any]:
         url = self._build_url(endpoint)
         try:
-            response = self.session.delete(url, timeout=timeout)
+            response = self.session.delete(url, params=params, timeout=timeout)
             response.raise_for_status()
             return response.json()
         except Exception as e:

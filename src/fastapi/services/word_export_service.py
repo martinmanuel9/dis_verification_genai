@@ -1152,13 +1152,183 @@ class WordExportService:
             "or download from https://pandoc.org/installing.html"
         )
 
+    def export_test_cards_to_word(self, test_cards: List[Dict[str, Any]], test_plan_title: str = "Test Plan") -> bytes:
+        """
+        Export test cards to a Word document with proper table formatting.
+
+        Args:
+            test_cards: List of test card dictionaries
+            test_plan_title: Title of the test plan
+
+        Returns:
+            bytes: Word document content
+        """
+        try:
+            doc = Document()
+            self._setup_document_styles(doc)
+
+            # Title
+            title = doc.add_heading(f'Test Cards: {test_plan_title}', 0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Metadata
+            doc.add_paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            doc.add_paragraph(f"Total Test Cards: {len(test_cards)}")
+            doc.add_paragraph("")
+
+            if not test_cards:
+                doc.add_paragraph("No test cards available.")
+                return self._document_to_bytes(doc)
+
+            # Create table with headers
+            # Simplified columns to match actual test card data structure
+            # Columns: Test ID | Test Title | Requirement ID | Requirement | Test Procedures | Status | Pass | Fail | Notes
+            table = doc.add_table(rows=1, cols=9)
+            table.style = 'Table Grid'
+
+            # Header row
+            headers = ['Test ID', 'Test Title', 'Requirement ID', 'Requirement', 'Test Procedures',
+                       'Status', 'Pass', 'Fail', 'Notes']
+            header_cells = table.rows[0].cells
+            for i, header in enumerate(headers):
+                header_cells[i].text = header
+                # Bold header text
+                for paragraph in header_cells[i].paragraphs:
+                    for run in paragraph.runs:
+                        run.font.bold = True
+
+            # Add test cards
+            for card in test_cards:
+                metadata = card.get('metadata', {})
+                content = card.get('content', '')
+
+                row_cells = table.add_row().cells
+
+                # Test ID
+                row_cells[0].text = metadata.get('test_id', 'N/A')
+
+                # Test Title (use document_name which is what we actually store)
+                row_cells[1].text = metadata.get('document_name', metadata.get('test_title', 'N/A'))
+
+                # Requirement ID
+                row_cells[2].text = metadata.get('requirement_id', 'N/A')
+
+                # Requirement Text
+                requirement_text = metadata.get('requirement_text', 'N/A')
+                if requirement_text and len(requirement_text) > 300:
+                    requirement_text = requirement_text[:297] + "..."
+                row_cells[3].text = requirement_text
+
+                # Test Procedures - parse markdown table to extract just the procedures column
+                procedures_text = self._extract_procedures_from_markdown_table(content) if content else 'N/A'
+                if len(procedures_text) > 500:
+                    procedures_text = procedures_text[:497] + "..."
+                row_cells[4].text = procedures_text
+
+                # Status (execution_status as text, not checkbox)
+                execution_status = metadata.get('execution_status', 'not_executed')
+                row_cells[5].text = execution_status.replace('_', ' ').title()
+
+                # Pass checkbox
+                passed = metadata.get('passed', 'false')
+                row_cells[6].text = '☑' if str(passed).lower() == 'true' else '☐'
+
+                # Fail checkbox
+                failed = metadata.get('failed', 'false')
+                row_cells[7].text = '☑' if str(failed).lower() == 'true' else '☐'
+
+                # Notes
+                row_cells[8].text = metadata.get('notes', '')
+
+            # Add table borders
+            self._set_table_borders(table)
+
+            doc.add_paragraph("")
+            doc.add_paragraph("Instructions: Update the Status field, fill in Pass/Fail checkboxes (☐/☑), and add notes during test execution.")
+            doc.add_paragraph("Status values: Not Executed, In Progress, Completed, Failed")
+
+            return self._document_to_bytes(doc)
+
+        except Exception as e:
+            logger.error(f"Failed to export test cards to Word: {str(e)}")
+            raise e
+
+    def _extract_procedures_from_markdown_table(self, markdown_table: str) -> str:
+        """
+        Extract test procedures text from markdown table.
+        Parses the markdown table and extracts the Procedures column content.
+
+        Table format: | Test ID | Test Title | Procedures | Expected Results | Acceptance Criteria | Dependencies | Executed | Pass | Fail | Notes |
+
+        Args:
+            markdown_table: Markdown table string
+
+        Returns:
+            Procedures text with <br> converted to newlines
+        """
+        try:
+            if not markdown_table or not markdown_table.strip():
+                return 'N/A'
+
+            lines = markdown_table.strip().split('\n')
+
+            # Need at least 3 lines (header, separator, data)
+            if len(lines) < 3:
+                return markdown_table  # Return as-is if not a table
+
+            # Find the data row (skip header line 0, separator line 1)
+            data_row = lines[2] if len(lines) > 2 else ""
+
+            # Split by pipe and clean up
+            cells = [cell.strip() for cell in data_row.split('|')]
+
+            # Table format: | Test ID | Test Title | Procedures | Expected Results | Acceptance Criteria | Dependencies | Executed | Pass | Fail | Notes |
+            # Cells indices: 0=empty, 1=Test ID, 2=Test Title, 3=Procedures, ...
+            if len(cells) > 3:
+                procedures = cells[3]  # Procedures column
+
+                # Convert <br> to newlines for better readability
+                procedures = procedures.replace('<br>', '\n').replace('<br/>', '\n')
+
+                # Remove any remaining HTML-like tags
+                import re
+                procedures = re.sub(r'<[^>]+>', '', procedures)
+
+                return procedures.strip()
+
+            return 'N/A'
+
+        except Exception as e:
+            logger.warning(f"Failed to parse markdown table for procedures: {e}")
+            return markdown_table  # Return original content if parsing fails
+
+    def _set_table_borders(self, table):
+        """Set borders for all cells in a table."""
+        tbl = table._tbl
+        tbl_pr = tbl.tblPr
+
+        # Remove existing borders
+        for el in tbl_pr.findall(qn('w:tblBorders')):
+            tbl_pr.remove(el)
+
+        # Add new borders
+        tbl_borders = OxmlElement('w:tblBorders')
+        for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+            element = OxmlElement(f'w:{edge}')
+            element.set(qn('w:val'), 'single')
+            element.set(qn('w:sz'), '12')  # Border size
+            element.set(qn('w:space'), '0')
+            element.set(qn('w:color'), '000000')  # Black borders
+            tbl_borders.append(element)
+        tbl_pr.append(tbl_borders)
+
     def _document_to_bytes(self, doc: Document) -> bytes:
         """Convert Document object to bytes."""
         doc_io = BytesIO()
         doc.save(doc_io)
         doc_io.seek(0)
         return doc_io.getvalue()
-    
+
     def cleanup_temp_files(self):
         """Clean up temporary files."""
         try:

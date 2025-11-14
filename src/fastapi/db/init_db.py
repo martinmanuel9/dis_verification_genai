@@ -32,7 +32,7 @@ import logging
 # Get logger without configuring (let uvicorn handle logging configuration)
 logger = logging.getLogger(__name__)
 
-MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+MIGRATIONS_DIR = Path(__file__).parent / "init_agent_creation"
 
 
 class MigrationTracker:

@@ -21,6 +21,7 @@ from datetime import datetime
 import redis
 import requests
 from docx import Document
+from docx.shared import Pt, RGBColor
 import base64
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -635,6 +636,68 @@ class MultiAgentTestPlanService:
         logger.info(f"Extracted {len(sections)} sections for multi-agent processing (fallback path)")
         return sections
 
+    def _clean_section_title(self, title: str) -> str:
+        """
+        Clean section title by removing PDF filenames and other artifacts.
+
+        Args:
+            title: Raw section title (e.g., "disr_ipv6_50.pdf - Introduction")
+
+        Returns:
+            Cleaned title (e.g., "Introduction")
+        """
+        import re
+
+        # Remove PDF filename prefix (e.g., "disr_ipv6_50.pdf - ")
+        title = re.sub(r'^[^\s]+\.pdf\s*-\s*', '', title)
+
+        # Remove document name prefix (e.g., "Document Name - ")
+        # but preserve section numbers
+        if ' - ' in title and not re.match(r'^\d+\.', title.split(' - ')[0]):
+            parts = title.split(' - ', 1)
+            if len(parts) == 2 and not parts[0].replace('.', '').replace(' ', '').isdigit():
+                title = parts[1]
+
+        # Clean up extra whitespace
+        title = ' '.join(title.split())
+
+        return title.strip()
+
+    def _normalize_section_content(self, content: str) -> str:
+        """
+        Normalize section content by removing duplicate section headings and adjusting heading levels.
+
+        When critic agents generate content, they include their own ## headings which conflict
+        with the numbered sections we add during assembly. This method:
+        1. Removes the first ## heading (which duplicates our numbered section title)
+        2. Keeps all other content including Dependencies, Conflicts, Test Procedures
+
+        Args:
+            content: Raw content from critic agent (synthesized_rules)
+
+        Returns:
+            Content with normalized heading structure
+        """
+        import re
+
+        lines = content.strip().split('\n')
+        output_lines = []
+        first_h2_removed = False
+
+        for line in lines:
+            # Skip the first ## heading (duplicates our numbered section title)
+            if line.strip().startswith('## ') and not first_h2_removed:
+                first_h2_removed = True
+                continue
+
+            # Skip empty lines immediately after removed heading
+            if not first_h2_removed and not line.strip():
+                continue
+
+            output_lines.append(line)
+
+        return '\n'.join(output_lines)
+
     def _create_document_sections(self, doc_name: str, full_document: str, sections: Dict[str, str]):
         """Create logical sections from a reconstructed full document using natural headers.
 
@@ -1210,16 +1273,20 @@ Actor Outputs from {len(actor_results)} GPT-4 models:
 
                 # Assemble document directly from section results without LLM consolidation
                 final_markdown = f"# {doc_title}\n\n"
-                final_markdown += "## Table of Contents\n\n"
 
-                for idx, result in enumerate(section_results, 1):
-                    final_markdown += f"{idx}. {result.section_title}\n"
+                # Note: Pandoc will auto-generate TOC with --toc flag, so we don't manually create one
+                # This prevents numbering conflicts
 
                 final_markdown += "\n---\n\n"
 
+                # Add sections with cleaned titles
                 for idx, result in enumerate(section_results, 1):
-                    final_markdown += f"## {idx}. {result.section_title}\n\n"
-                    final_markdown += result.synthesized_rules
+                    clean_title = self._clean_section_title(result.section_title)
+                    final_markdown += f"## {idx}. {clean_title}\n\n"
+                    # Normalize heading levels: strip first ## heading from synthesized_rules if present,
+                    # and downgrade remaining headings (## → ###, ### → ####)
+                    content = self._normalize_section_content(result.synthesized_rules)
+                    final_markdown += content
                     final_markdown += "\n\n---\n\n"
 
                 final_markdown += "## Summary & Recommendations\n\n"
@@ -1231,22 +1298,32 @@ Actor Outputs from {len(actor_results)} GPT-4 models:
                 logger.info(f"Content size acceptable ({estimated_tokens:.0f} tokens estimated). Running final critic consolidation.")
 
                 # Final critic prompt (based on notebook's final_test_plan_docx logic)
-                prompt = f"""You are a final Critic AI creating a comprehensive MIL-STD test plan.
+                prompt = f"""You are a final Critic AI creating a comprehensive military/technical standard test plan.
 
-Given the following detailed section-by-section test rule reports (each synthesized from multiple GPT-4 actor agents), combine them into a single, fully ordered, professional test plan document:
+Given the following detailed section-by-section test procedures (each synthesized from multiple GPT-4 actor agents), combine them into a single, fully ordered, professional test plan document:
 
-1. Use a Title Page: '{doc_title}'
-2. Generate a Table of Contents using ALL main section titles, in order
-3. For each section, include the detailed test rules and procedures
-4. End with a 'Summary & Recommendations' section synthesizing the most critical points and overall compliance strategy
+DOCUMENT STRUCTURE:
+1. Title Page: '{doc_title}'
+2. Executive Summary: Brief overview of test scope and objectives
+3. For each section: Include the detailed TEST PROCEDURES (not requirements tables) with CLEAN section titles
+4. Summary & Recommendations: Synthesize critical points and compliance strategy
 
-Only main content-based section titles should be in TOC, no subheadings like 'Dependencies', 'Test Rules', etc.
-Preserve markdown bolds and headings for later conversion to DOCX headings and bullets.
+NOTE: Do NOT manually create a "Table of Contents" - Pandoc will auto-generate it from section headings.
 
-Numbering and structure requirements:
-- Produce strictly enumerated section headings: 1, 2, 3, ... (and if you introduce sub-sections, use 1.1, 1.2, 2.1, etc.)
-- Start each main section heading with its number, followed by the section title
-- Ensure numbering is continuous and no numbers are skipped
+CRITICAL REQUIREMENTS:
+- PRESERVE ORIGINAL REQUIREMENT IDs from source document (e.g., 4.2.1, REQ-01, etc.)
+- DO NOT generate requirements tables - include TEST PROCEDURES only
+- Each test procedure must have: Requirement ID, Objective, Setup, Steps, Expected Results, Pass/Fail Criteria
+- Use hierarchical numbering for TEST PLAN sections: 1, 2, 3, ... (sub-sections: 1.1, 1.2, 2.1, etc.)
+- DO NOT include Table of Contents from the source documents
+- CLEAN section titles: Remove PDF filenames (e.g., "disr_ipv6_50.pdf - Introduction" becomes "Introduction")
+- Ensure test procedures are executable by engineers
+- Use BULLET POINTS (-, *) for all lists within test procedures (not numbered lists 1., 2., 3.) to prevent enumeration conflicts
+
+FORMAT:
+- Only main test plan section titles in TOC (not 'Dependencies', 'Test Rules', etc.)
+- Preserve markdown formatting for DOCX conversion
+- Ensure continuous numbering with no gaps
 
 SECTIONS SUMMARY:
 {json.dumps(sections_summary, indent=2)}
@@ -1266,7 +1343,11 @@ Create a comprehensive markdown document that consolidates all {len(section_resu
 
             # Apply final deduplication
             final_markdown = self._final_global_deduplicate(final_markdown)
-            
+
+            # REMOVED: _add_structured_tables() - this was generating unwanted requirements tables
+            # The actor/critic agents now generate proper test procedures with original requirement IDs
+            # No need for post-processing table generation
+
             # Calculate totals
             total_requirements = sum(len(result.test_procedures) for result in section_results)
             total_test_procedures = total_requirements  # Each requirement becomes a test procedure
@@ -1283,15 +1364,16 @@ Create a comprehensive markdown document that consolidates all {len(section_resu
                 "completed_at": datetime.now().isoformat()
             }
             self.redis_client.hset(final_result_key, mapping=final_data)
-            # Update pipeline meta status and bump recency
+            # Update pipeline meta processing status (NOT completed - that's done by background task)
             try:
                 self._update_pipeline_metadata(pipeline_id, {
-                    "status": "COMPLETED",
-                    "completed_at": final_data["completed_at"],
+                    "status": "processing",  # Keep as processing; background task will set to "completed"
+                    "progress_message": "Test plan generated, preparing export...",
+                    "last_updated_at": datetime.now().isoformat()
                 })
                 self.redis_client.zadd("pipeline:recent", {pipeline_id: time.time()})
             except Exception as e:
-                logger.warning(f"Failed to update pipeline meta completion: {e}")
+                logger.warning(f"Failed to update pipeline meta: {e}")
             
             return FinalTestPlan(
                 title=doc_title,
@@ -1370,7 +1452,198 @@ Create a comprehensive markdown document that consolidates all {len(section_resu
                 out.append(joined)
         
         return '\n'.join(out)
-    
+
+    def _add_structured_tables(self, markdown: str) -> str:
+        """
+        Add structured Requirements and Test Procedures tables to the test plan.
+
+        Extracts requirements and test procedures from narrative text and formats them
+        into structured markdown tables with proper headers and IDs.
+
+        Args:
+            markdown: The consolidated test plan markdown
+
+        Returns:
+            Enhanced markdown with structured tables
+        """
+        import re
+        from typing import List, Dict, Any
+
+        logger.info("Adding structured Requirements and Test Procedures tables...")
+
+        # Split into sections
+        sections = re.split(r'\n(?=#+\s+\d+\.)', markdown)
+
+        enhanced_sections = []
+        req_counter = 1
+        test_counter = 1
+
+        for section in sections:
+            if not section.strip():
+                continue
+
+            # Extract section header
+            lines = section.split('\n')
+            section_header = lines[0] if lines else ""
+            section_content = '\n'.join(lines[1:]) if len(lines) > 1 else ""
+
+            # Extract requirements from section
+            requirements = self._extract_requirements_from_section(section_content, req_counter)
+            req_counter += len(requirements)
+
+            # Extract test procedures from section
+            test_procedures = self._extract_test_procedures_from_section(section_content, test_counter)
+            test_counter += len(test_procedures)
+
+            # Build enhanced section
+            enhanced_section = section_header + '\n\n'
+
+            # Add Requirements table if any found
+            if requirements:
+                enhanced_section += "### Requirements\n\n"
+                enhanced_section += "| Req ID | Requirement Description | Source | Priority | Testable |\n"
+                enhanced_section += "|--------|------------------------|--------|----------|----------|\n"
+                for req in requirements:
+                    enhanced_section += f"| {req['id']} | {req['description'][:100]} | {req['source']} | {req['priority']} | {req['testable']} |\n"
+                enhanced_section += "\n"
+
+            # Add original section content
+            enhanced_section += section_content + '\n\n'
+
+            # Add Test Procedures table if any found
+            if test_procedures:
+                enhanced_section += "### Test Procedures\n\n"
+                enhanced_section += "| Test ID | Test Description | Steps | Expected Result | Acceptance Criteria | Req ID |\n"
+                enhanced_section += "|---------|-----------------|-------|-----------------|---------------------|--------|\n"
+                for test in test_procedures:
+                    steps = '; '.join(test['steps'][:3]) if test['steps'] else 'N/A'
+                    enhanced_section += f"| {test['id']} | {test['description'][:80]} | {steps[:60]} | {test['expected_result'][:60]} | {test['acceptance_criteria'][:60]} | {test['req_id']} |\n"
+                enhanced_section += "\n"
+
+            enhanced_sections.append(enhanced_section)
+
+        result = '\n'.join(enhanced_sections)
+
+        # Add summary tables at the beginning
+        all_requirements = []
+        all_tests = []
+        req_counter = 1
+        test_counter = 1
+
+        for section in sections:
+            if not section.strip():
+                continue
+            lines = section.split('\n')
+            section_content = '\n'.join(lines[1:]) if len(lines) > 1 else ""
+
+            reqs = self._extract_requirements_from_section(section_content, req_counter)
+            req_counter += len(reqs)
+            all_requirements.extend(reqs)
+
+            tests = self._extract_test_procedures_from_section(section_content, test_counter)
+            test_counter += len(tests)
+            all_tests.extend(tests)
+
+        # Prepend summary
+        summary = "# Requirements and Test Procedures Summary\n\n"
+        summary += f"**Total Requirements:** {len(all_requirements)}\n\n"
+        summary += f"**Total Test Procedures:** {len(all_tests)}\n\n"
+        summary += "---\n\n"
+
+        logger.info(f"Added {len(all_requirements)} requirements and {len(all_tests)} test procedures to tables")
+
+        return summary + result
+
+    def _extract_requirements_from_section(self, content: str, start_id: int) -> List[Dict[str, Any]]:
+        """Extract requirements from section content"""
+        requirements = []
+
+        # Pattern matching for requirement keywords
+        requirement_patterns = [
+            r'(?i)(must|shall|should|required?)\s+(.{20,200}?)(?:\.|;|\n)',
+            r'(?i)requirement:?\s*(.{20,200}?)(?:\.|;|\n)',
+            r'(?i)the\s+(?:system|device|implementation|software)\s+(must|shall|should)\s+(.{20,200}?)(?:\.|;|\n)',
+        ]
+
+        for pattern in requirement_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE | re.MULTILINE)
+            for match in matches:
+                if len(match.groups()) >= 2:
+                    desc = match.group(2).strip() if len(match.group(2)) > len(match.group(1)) else match.group(1).strip()
+                else:
+                    desc = match.group(1).strip()
+
+                # Clean up description
+                desc = desc.replace('\n', ' ').strip()
+                if len(desc) < 20 or len(desc) > 300:
+                    continue
+
+                # Check if already added
+                if any(req['description'] == desc for req in requirements):
+                    continue
+
+                # Determine priority based on keywords
+                priority = "High" if "must" in match.group(0).lower() or "shall" in match.group(0).lower() else "Medium"
+
+                requirements.append({
+                    'id': f'REQ-{start_id + len(requirements):03d}',
+                    'description': desc,
+                    'source': 'Section Analysis',
+                    'priority': priority,
+                    'testable': 'Yes'
+                })
+
+                if len(requirements) >= 10:  # Limit per section
+                    break
+
+        return requirements
+
+    def _extract_test_procedures_from_section(self, content: str, start_id: int) -> List[Dict[str, Any]]:
+        """Extract test procedures from section content"""
+        test_procedures = []
+
+        # Pattern matching for test procedures
+        test_patterns = [
+            r'(?i)test(?:\s+procedure)?:?\s*(.{20,200}?)(?:\.|;|\n)',
+            r'(?i)verify(?:\s+that)?\s+(.{20,200}?)(?:\.|;|\n)',
+            r'(?i)(?:check|confirm|ensure|validate)\s+(?:that\s+)?(.{20,200}?)(?:\.|;|\n)',
+            r'\d+\.\s+(.{20,200}?)(?:\.|;|\n)',  # Numbered lists
+        ]
+
+        for pattern in test_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE | re.MULTILINE)
+            for match in matches:
+                desc = match.group(1).strip()
+
+                # Clean up description
+                desc = desc.replace('\n', ' ').strip()
+                if len(desc) < 15 or len(desc) > 300:
+                    continue
+
+                # Check if already added
+                if any(test['description'] == desc for test in test_procedures):
+                    continue
+
+                # Extract steps if bulleted/numbered list follows
+                steps = []
+                # Simple step extraction (can be enhanced)
+                step_matches = re.findall(r'(?:^|\n)\s*[-•]\s*(.+?)(?=\n|$)', content[match.end():match.end()+500])
+                steps = [s.strip() for s in step_matches[:5]]
+
+                test_procedures.append({
+                    'id': f'TC-{start_id + len(test_procedures):03d}',
+                    'description': desc,
+                    'steps': steps if steps else ['Setup test environment', 'Execute test', 'Verify results'],
+                    'expected_result': 'Test passes all criteria',
+                    'acceptance_criteria': 'All requirements met',
+                    'req_id': f'REQ-{start_id:03d}'  # Link to first requirement in section
+                })
+
+                if len(test_procedures) >= 10:  # Limit per section
+                    break
+
+        return test_procedures
+
     def _extract_dependencies_from_markdown(self, markdown: str) -> List[str]:
         """Extract dependencies from markdown format"""
         dependencies = []
@@ -1571,35 +1844,198 @@ This test plan was generated in fallback mode due to section extraction issues.
         return base64.b64encode(buf.getvalue()).decode("utf-8")
     
     def _convert_markdown_to_docx(self, markdown_content: str, doc: Document):
-        """Convert markdown to Word document (based on notebook's markdown_to_docx)"""
+        """Convert markdown to Word document with proper formatting"""
         lines = markdown_content.split('\n')
-        
-        for line in lines:
+        i = 0
+        in_table = False
+        table_lines = []
+        in_code_block = False
+        code_lines = []
+
+        while i < len(lines):
+            line = lines[i]
             l = line.strip()
-            if not l:
+
+            # Handle code blocks
+            if l.startswith('```'):
+                if in_code_block:
+                    # End of code block - add as formatted text
+                    if code_lines:
+                        code_para = doc.add_paragraph('\n'.join(code_lines))
+                        code_para.style = 'Normal'
+                        for run in code_para.runs:
+                            run.font.name = 'Courier New'
+                            run.font.size = Pt(9)
+                    code_lines = []
+                    in_code_block = False
+                else:
+                    in_code_block = True
+                i += 1
                 continue
-                
-            if l.startswith('# '):
-                continue  # Skip main title as already added
-            elif l.startswith('## '):  # Section/subsection heading
-                doc.add_heading(l.replace("##", "").strip(), level=1)
-            elif l.startswith("**") and l.endswith("**"):
-                doc.add_heading(l.replace("*", "").strip(), level=2)
-            elif l.startswith(("-", "*", "•")):
-                doc.add_paragraph(l.lstrip("-*• ").strip(), style='List Bullet')
-            elif l[:2].isdigit() and l[2] in ('.', ')'):
-                doc.add_paragraph(l, style='List Number')
-            elif "**" in l:  # Remove inline bold
-                parts = l.split("**")
-                p = doc.add_paragraph()
-                toggle = False
-                for part in parts:
-                    run = p.add_run(part)
-                    if toggle:
-                        run.bold = True
-                    toggle = not toggle
-            else:
-                doc.add_paragraph(l)
+
+            if in_code_block:
+                code_lines.append(line)
+                i += 1
+                continue
+
+            # Handle tables
+            if '|' in l and l.count('|') >= 2:
+                if not in_table:
+                    in_table = True
+                    table_lines = []
+                table_lines.append(l)
+                i += 1
+                continue
+            elif in_table:
+                # Process accumulated table
+                self._add_markdown_table_to_doc(doc, table_lines)
+                table_lines = []
+                in_table = False
+                # Don't increment i, process this line as normal
+
+            # Skip empty lines
+            if not l:
+                i += 1
+                continue
+
+            # Handle headings
+            if l.startswith('#'):
+                heading_level = 0
+                while heading_level < len(l) and l[heading_level] == '#':
+                    heading_level += 1
+                heading_text = l[heading_level:].strip()
+                if heading_level == 1:
+                    # Skip main title as already added
+                    pass
+                elif heading_level == 2:
+                    doc.add_heading(heading_text, level=1)
+                elif heading_level == 3:
+                    doc.add_heading(heading_text, level=2)
+                elif heading_level == 4:
+                    doc.add_heading(heading_text, level=3)
+                else:
+                    doc.add_heading(heading_text, level=4)
+                i += 1
+                continue
+
+            # Handle bold-only lines as headings
+            if l.startswith("**") and l.endswith("**") and l.count("**") == 2:
+                doc.add_heading(l.replace("*", "").strip(), level=3)
+                i += 1
+                continue
+
+            # Handle bullet lists
+            if l.startswith(("-", "*", "•")) and len(l) > 1 and l[1] == ' ':
+                text = l[2:].strip()
+                self._add_formatted_paragraph(doc, text, style='List Bullet')
+                i += 1
+                continue
+
+            # Handle numbered lists
+            if re.match(r'^\d+[\.\)]\s', l):
+                text = re.sub(r'^\d+[\.\)]\s+', '', l)
+                self._add_formatted_paragraph(doc, text, style='List Number')
+                i += 1
+                continue
+
+            # Regular paragraph with inline formatting
+            self._add_formatted_paragraph(doc, l)
+            i += 1
+
+        # Process any remaining table
+        if in_table and table_lines:
+            self._add_markdown_table_to_doc(doc, table_lines)
+
+    def _add_formatted_paragraph(self, doc: Document, text: str, style='Normal'):
+        """Add a paragraph with proper inline markdown formatting (bold, italic, links)"""
+        p = doc.add_paragraph(style=style)
+
+        # Parse inline markdown: **bold**, *italic*, [link](url)
+        i = 0
+        while i < len(text):
+            # Check for bold **text**
+            if text[i:i+2] == '**':
+                end = text.find('**', i+2)
+                if end != -1:
+                    run = p.add_run(text[i+2:end])
+                    run.bold = True
+                    i = end + 2
+                    continue
+
+            # Check for italic *text* (but not part of **)
+            if text[i] == '*' and (i == 0 or text[i-1] != '*') and (i+1 < len(text) and text[i+1] != '*'):
+                end = text.find('*', i+1)
+                if end != -1 and (end+1 >= len(text) or text[end+1] != '*'):
+                    run = p.add_run(text[i+1:end])
+                    run.italic = True
+                    i = end + 1
+                    continue
+
+            # Check for links [text](url)
+            if text[i] == '[':
+                link_end = text.find('](', i)
+                if link_end != -1:
+                    url_end = text.find(')', link_end+2)
+                    if url_end != -1:
+                        link_text = text[i+1:link_end]
+                        # Just add the link text, not the URL (Word doc limitation)
+                        run = p.add_run(link_text)
+                        run.font.color.rgb = RGBColor(0, 0, 255)
+                        run.underline = True
+                        i = url_end + 1
+                        continue
+
+            # Regular character
+            p.add_run(text[i])
+            i += 1
+
+    def _add_markdown_table_to_doc(self, doc: Document, table_lines: list):
+        """Convert markdown table to Word table"""
+        if not table_lines:
+            return
+
+        # Filter out separator lines (---|---|---)
+        data_lines = [line for line in table_lines if not re.match(r'^\s*\|[\s\-:|]+\|\s*$', line)]
+
+        if not data_lines:
+            return
+
+        # Parse table rows
+        rows = []
+        for line in data_lines:
+            # Split by | and clean up
+            cells = [cell.strip() for cell in line.split('|')]
+            # Remove empty first/last cells if present
+            if cells and not cells[0]:
+                cells = cells[1:]
+            if cells and not cells[-1]:
+                cells = cells[:-1]
+            if cells:
+                rows.append(cells)
+
+        if not rows:
+            return
+
+        # Create Word table
+        num_cols = len(rows[0])
+        table = doc.add_table(rows=len(rows), cols=num_cols)
+        table.style = 'Light Grid Accent 1'
+
+        # Populate table
+        for i, row_data in enumerate(rows):
+            row = table.rows[i]
+            for j, cell_text in enumerate(row_data):
+                if j < len(row.cells):
+                    cell = row.cells[j]
+                    # Remove markdown formatting from cell text
+                    clean_text = re.sub(r'\*\*(.+?)\*\*', r'\1', cell_text)  # Remove bold
+                    clean_text = re.sub(r'\*(.+?)\*', r'\1', clean_text)  # Remove italic
+                    cell.text = clean_text
+                    # Make header row bold
+                    if i == 0:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.bold = True
     
     def save_to_chromadb(self, test_plan: FinalTestPlan, session_id: str, pipeline_id: Optional[str] = None) -> Dict[str, Any]:
         """Save generated test plan to ChromaDB (single collection) with idempotency per pipeline.
@@ -1609,10 +2045,13 @@ This test plan was generated in fallback mode due to section extraction issues.
         try:
             # First, ensure the target collection exists
             target_collection = os.getenv("GENERATED_TESTPLAN_COLLECTION", "generated_test_plan")
+            logger.info(f"Attempting to save test plan to collection: {target_collection}")
             self._ensure_collection_exists(target_collection)
+            logger.info(f"Collection {target_collection} verified/created")
 
             # Determine pipeline id
             pid = pipeline_id or getattr(test_plan, 'pipeline_id', None)
+            logger.info(f"Saving test plan with pipeline_id: {pid}, session_id: {session_id}")
 
             # If a document was already saved for this pipeline, return that
             if pid:
@@ -1620,6 +2059,7 @@ This test plan was generated in fallback mode due to section extraction issues.
                     meta = self.redis_client.hgetall(f"pipeline:{pid}:meta") or {}
                     existing_id = meta.get("generated_document_id")
                     if existing_id:
+                        logger.info(f"Test plan already saved for pipeline {pid}, reusing document_id: {existing_id}")
                         return {
                             "document_id": existing_id,
                             "collection_name": meta.get("collection", target_collection),
@@ -1628,8 +2068,8 @@ This test plan was generated in fallback mode due to section extraction issues.
                             "architecture": "multi_agent_gpt4",
                             "reused": True
                         }
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Error checking for existing document: {e}")
 
                 # Acquire a short-lived lock to avoid concurrent double-save
                 try:
@@ -1659,7 +2099,11 @@ This test plan was generated in fallback mode due to section extraction issues.
             doc_content += f"Test Procedures: {test_plan.total_test_procedures}\n\n"
             doc_content += test_plan.consolidated_markdown
             
-            # Prepare metadata
+            # Generate unique document ID first (needed for metadata)
+            doc_id = f"testplan_multiagent_{(pid or session_id)}_{uuid.uuid4().hex[:8]}"
+            logger.info(f"Generated document ID: {doc_id}")
+
+            # Prepare metadata (include document_id for UI compatibility)
             metadata = {
                 "title": test_plan.title,
                 "type": "generated_test_plan",
@@ -1672,26 +2116,31 @@ This test plan was generated in fallback mode due to section extraction issues.
                 "processing_status": test_plan.processing_status,
                 "agent_types": "3x_gpt4_actors_1x_gpt4_critic_1x_final_critic",
                 "word_count": len(doc_content.split()),
-                "char_count": len(doc_content)
+                "char_count": len(doc_content),
+                # UI compatibility fields
+                "document_id": doc_id,
+                "document_name": test_plan.title
             }
-            
-            # Generate unique document ID
-            doc_id = f"testplan_multiagent_{(pid or session_id)}_{uuid.uuid4().hex[:8]}"
-            
+
             # Save to ChromaDB
             payload = {
-                "collection_name": target_collection, 
+                "collection_name": target_collection,
                 "documents": [doc_content],
                 "metadatas": [metadata],
                 "ids": [doc_id]
             }
-            
+
+            logger.info(f"Sending save request to ChromaDB: {self.fastapi_url}/api/vectordb/documents/add")
+            logger.info(f"Payload metadata: {metadata}")
+
             response = requests.post(
                 f"{self.fastapi_url}/api/vectordb/documents/add",
                 json=payload,
                 timeout=30
             )
-            
+
+            logger.info(f"ChromaDB response status: {response.status_code}")
+
             if response.ok:
                 logger.info(f"Saved multi-agent test plan to ChromaDB ({target_collection}): {doc_id}")
                 # Record generated doc in pipeline meta if pipeline_id provided
@@ -1713,12 +2162,23 @@ This test plan was generated in fallback mode due to section extraction issues.
                     "architecture": "multi_agent_gpt4"
                 }
             else:
-                logger.error(f"Failed to save to ChromaDB: {response.status_code} - {response.text}")
-                return {"saved": False, "error": response.text}
+                error_msg = f"Failed to save to ChromaDB: {response.status_code} - {response.text}"
+                logger.error(error_msg)
+                logger.error(f"Failed payload collection: {target_collection}, doc_id: {doc_id}")
+                return {"saved": False, "error": response.text, "status_code": response.status_code}
 
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error saving to ChromaDB: {e}"
+            logger.error(error_msg)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {"saved": False, "error": str(e), "error_type": "network"}
         except Exception as e:
-            logger.error(f"Error saving to ChromaDB: {e}")
-            return {"saved": False, "error": str(e)}
+            error_msg = f"Unexpected error saving to ChromaDB: {e}"
+            logger.error(error_msg)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {"saved": False, "error": str(e), "error_type": "unexpected"}
     
     def _ensure_generated_documents_collection_exists(self):
         """Deprecated no-op: use _ensure_collection_exists with GENERATED_TESTPLAN_COLLECTION instead."""

@@ -54,6 +54,7 @@ readability = "^0.3.2"
 plotly = "^6.3.0"
 tiktoken = "^0.8.0"
 pypandoc = "^1.13"
+celery = {extras = ["redis"], version = "^5.4.0"}
 
 
 [build-system]

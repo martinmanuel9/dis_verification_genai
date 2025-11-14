@@ -7,6 +7,7 @@ import time
 from config.settings import config
 from lib.api.client import api_client
 from services.chromadb_service import chromadb_service
+from components.job_status_monitor import JobStatusMonitor
 
 
 def Document_Generator():
@@ -27,225 +28,75 @@ def Document_Generator():
 
         st.info(f"Active Pipeline: `{pipeline_id}`")
 
-        # Show current status
-        try:
-            status_response = api_client.get(
-                f"{config.endpoints.doc_gen}/generation-status/{pipeline_id}",
-                timeout=10
-            )
-            status = status_response.get("status", "unknown")
-            progress_msg = status_response.get("progress_message", "")
+        # Define completion handler for test plan generation
+        def on_test_plan_completed(result_response):
+            docs = result_response.get("documents", [])
 
-            # Normalize status to lowercase for comparison
-            status_lower = status.lower()
+            if docs and len(docs) > 0:
+                primary_doc = docs[0]
+                st.success(f"Document ready: **{primary_doc['title']}**")
 
-            if status_lower == "completed":
-                st.success(f"Generation completed!")
+                # Stats
+                st.metric("Sections", primary_doc.get('total_sections', 0))
 
-                # Get result
-                try:
-                    result_response = api_client.get(
-                        f"{config.endpoints.doc_gen}/generation-result/{pipeline_id}",
-                        timeout=30
-                    )
-                    docs = result_response.get("documents", [])
+                # Download buttons
+                st.markdown("### Download Options")
 
-                    if docs and len(docs) > 0:
-                        primary_doc = docs[0]
-                        st.success(f"Document ready: **{primary_doc['title']}**")
+                download_col1, download_col2 = st.columns(2)
 
-                        # Stats
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Sections", primary_doc.get('total_sections', 0))
-                        col2.metric("Requirements", primary_doc.get('total_requirements', 0))
-                        col3.metric("Test Procedures", primary_doc.get('total_test_procedures', 0))
+                with download_col1:
+                    # DOCX download (Pandoc format)
+                    if 'docx_b64' in primary_doc and primary_doc['docx_b64']:
+                        blob = base64.b64decode(primary_doc["docx_b64"])
+                        st.download_button(
+                            label="Download DOCX",
+                            data=blob,
+                            file_name=f"{primary_doc['title']}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="download_completed_docx",
+                            type="primary",
+                            use_container_width=True
+                        )
 
-                        # Download button
-                        if 'docx_b64' in primary_doc and primary_doc['docx_b64']:
-                            blob = base64.b64decode(primary_doc["docx_b64"])
-                            st.download_button(
-                                label=f"📥 Download {primary_doc['title']}.docx",
-                                data=blob,
-                                file_name=f"{primary_doc['title']}.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                key="download_completed_doc",
-                                type="primary"
-                            )
-
-                        # Clear pipeline to start fresh
-                        if st.button("Start New Generation", key="clear_pipeline"):
-                            if "pipeline_id" in st.session_state:
-                                del st.session_state.pipeline_id
-                            if "pipeline_id" in st.query_params:
-                                del st.query_params["pipeline_id"]
-                            st.rerun()
-                    else:
-                        st.warning("No documents found in result")
-                        if st.button("Clear and Retry", key="clear_failed"):
-                            if "pipeline_id" in st.session_state:
-                                del st.session_state.pipeline_id
-                            if "pipeline_id" in st.query_params:
-                                del st.query_params["pipeline_id"]
-                            st.rerun()
-
-                except Exception as e:
-                    st.error(f"Failed to retrieve result: {e}")
-                    if st.button("Clear and Retry", key="clear_error"):
-                        if "pipeline_id" in st.session_state:
-                            del st.session_state.pipeline_id
-                        if "pipeline_id" in st.query_params:
-                            del st.query_params["pipeline_id"]
-                        st.rerun()
-
-            elif status_lower == "failed":
-                st.error(f"Generation failed")
-                st.error(f"Error: {status_response.get('error', 'Unknown error')}")
-
-                if st.button("Clear and Retry", key="clear_failed_pipeline"):
-                    if "pipeline_id" in st.session_state:
-                        del st.session_state.pipeline_id
-                    if "pipeline_id" in st.query_params:
-                        del st.query_params["pipeline_id"]
-                    st.rerun()
-
-            elif status_lower == "cancelling":
-                st.warning(f"Generation is being cancelled...")
-                st.write(f"**Status:** {status}")
-                st.write(f"**Message:** {progress_msg}")
-                st.info("The pipeline will stop at the next checkpoint and may return partial results.")
-
-                if st.button("Refresh Status", key="refresh_cancelling"):
-                    st.rerun()
-
-                if st.button("Clear Pipeline", key="clear_cancelling"):
-                    if "pipeline_id" in st.session_state:
-                        del st.session_state.pipeline_id
-                    if "pipeline_id" in st.query_params:
-                        del st.query_params["pipeline_id"]
-                    st.rerun()
-
-            elif status_lower in ["queued", "processing", "initializing"]:
-                st.info(f"Generation in progress...")
-
-                # Show detailed progress
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Status", status.upper())
-                with col2:
-                    sections_done = status_response.get("sections_processed", "0")
-                    total_sections = status_response.get("total_sections", "?")
-                    st.metric("Sections", f"{sections_done}/{total_sections}")
-                with col3:
-                    created_at = status_response.get("created_at", "")
-                    if created_at:
-                        from datetime import datetime
-                        try:
-                            created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                            elapsed = datetime.now() - created.replace(tzinfo=None)
-                            minutes = int(elapsed.total_seconds() / 60)
-                            st.metric("Elapsed", f"{minutes}m")
-                        except:
-                            st.metric("Elapsed", "N/A")
-
-                st.write(f"**Progress:** {progress_msg}")
-
-                # Control buttons
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    if st.button("Refresh Status", key="manual_refresh", type="secondary", use_container_width=True):
-                        st.rerun()
-                with col2:
-                    if st.button("Cancel Generation", key="cancel_pipeline", type="primary", use_container_width=True):
-                        try:
-                            cancel_response = api_client.post(
-                                f"{config.endpoints.doc_gen}/cancel-pipeline/{pipeline_id}",
-                                data={},
-                                timeout=10
-                            )
-                            st.success("Cancellation requested!")
-                            time.sleep(2)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to cancel: {e}")
-
-                st.markdown("---")
-
-                # Auto-polling option (now enabled by default)
-                enable_auto_poll = st.checkbox("Enable auto-refresh (every 10 seconds)", value=True, key="enable_poll")
-
-                if enable_auto_poll:
-                    st.caption("Auto-refreshing every 10 seconds...")
-
-                    # Use empty placeholders that can be updated (not appended to)
-                    progress_bar_placeholder = st.empty()
-                    status_placeholder = st.empty()
-                    timestamp_placeholder = st.empty()
-
-                    max_checks = 60  # 10 minutes of polling
-                    consecutive_failures = 0
-
-                    for i in range(max_checks):
-                        time.sleep(10)
-
-                        try:
-                            status_response = api_client.get(
-                                f"{config.endpoints.doc_gen}/generation-status/{pipeline_id}",
-                                timeout=15
-                            )
-                            current_status = status_response.get("status", "unknown")
-                            progress_msg = status_response.get("progress_message", "")
-                            sections_done = status_response.get("sections_processed", "0")
-                            total_sections = status_response.get("total_sections", "?")
-
-                            # Calculate progress percentage
-                            try:
-                                if total_sections != "?" and int(total_sections) > 0:
-                                    progress_pct = int(sections_done) / int(total_sections)
-                                else:
-                                    progress_pct = (i + 1) % 100 / 100
-                            except:
-                                progress_pct = (i + 1) % 100 / 100
-
-                            # Update placeholders (replaces content, doesn't append)
-                            progress_bar_placeholder.progress(progress_pct)
-                            status_placeholder.caption(f"{current_status.upper()} | Sections: {sections_done}/{total_sections} | {progress_msg}")
-                            timestamp_placeholder.caption(f"Last updated: {time.strftime('%H:%M:%S')}")
-
-                            consecutive_failures = 0
-
-                            if current_status.lower() in ["completed", "failed"]:
-                                st.success(f"Status changed to: {current_status}")
-                                time.sleep(2)
-                                st.rerun()
-                                break
-
-                        except Exception as e:
-                            consecutive_failures += 1
-                            status_placeholder.caption(f"Connection issue (attempt {consecutive_failures}/3): Server is busy processing...")
-
-                            if consecutive_failures >= 3:
-                                st.warning("Auto-refresh stopped due to connection issues. Click 'Refresh Status' button to check manually.")
-                                break
-
-                            time.sleep(15)
-
+                with download_col2:
+                    # Markdown download
+                    if 'content' in primary_doc and primary_doc['content']:
+                        st.download_button(
+                            label="Download Markdown",
+                            data=primary_doc['content'],
+                            file_name=f"{primary_doc['title']}.md",
+                            mime="text/markdown",
+                            key="download_completed_md",
+                            type="secondary",
+                            use_container_width=True
+                        )
             else:
-                st.warning(f"Unknown status: {status}")
-                if st.button("Clear Pipeline", key="clear_unknown"):
-                    if "pipeline_id" in st.session_state:
-                        del st.session_state.pipeline_id
-                    if "pipeline_id" in st.query_params:
-                        del st.query_params["pipeline_id"]
-                    st.rerun()
+                st.warning("No documents found in result")
 
-        except Exception as e:
-            st.error(f"Failed to check status: {e}")
-            if st.button("Clear Pipeline and Retry", key="clear_status_error"):
-                if "pipeline_id" in st.session_state:
-                    del st.session_state.pipeline_id
-                if "pipeline_id" in st.query_params:
-                    del st.query_params["pipeline_id"]
-                st.rerun()
+        # Define clear handler
+        def on_clear():
+            if "pipeline_id" in st.session_state:
+                del st.session_state.pipeline_id
+            if "pipeline_id" in st.query_params:
+                del st.query_params["pipeline_id"]
+
+        # Use the reusable JobStatusMonitor component
+        monitor = JobStatusMonitor(
+            job_id=pipeline_id,
+            session_key="pipeline",
+            status_endpoint=f"{config.endpoints.doc_gen}/generation-status/{{job_id}}",
+            result_endpoint=f"{config.endpoints.doc_gen}/generation-result/{{job_id}}",
+            job_name="Test Plan Generation",
+            show_metrics=True,
+            show_elapsed_time=True,
+            allow_cancel=True,
+            cancel_endpoint=f"{config.endpoints.doc_gen}/cancel-pipeline/{{job_id}}",
+            on_completed=on_test_plan_completed,
+            on_clear=on_clear,
+            auto_refresh_interval=10,  # Refresh every 10 seconds
+            auto_clear_on_complete=False  # Keep results visible for download
+        )
+        monitor.render()
 
         # Stop here - don't show form fields when pipeline is active
         st.stop()
@@ -346,50 +197,30 @@ def Document_Generator():
     ).strip()
 
     # ----------------------------
-    # 4) Test Card & Export Options
+    # 4) Export Options
     # ----------------------------
     st.markdown("---")
-    st.subheader("Test Card & Export Options")
+    st.subheader("Export Options")
 
-    col1, col2 = st.columns(2)
+    # Export format info
+    st.info("Export Format: **Pandoc** (Professional formatting with TOC)")
 
-    with col1:
-        include_test_cards = st.checkbox(
-            "Include Test Cards in Generated Document",
+    # Pandoc export options
+    pandoc_col1, pandoc_col2 = st.columns(2)
+
+    with pandoc_col1:
+        include_toc = st.checkbox(
+            "Include Table of Contents",
             value=True,
-            help="Add executable test card tables after each section",
-            key="gen_include_test_cards"
+            key="gen_include_toc"
         )
 
-    with col2:
-        export_method = st.radio(
-            "Export Method:",
-            ["Standard (python-docx)", "Professional (Pandoc)"],
-            horizontal=True,
-            help="Pandoc provides better formatting with automatic TOC and section numbering",
-            key="gen_export_method"
+    with pandoc_col2:
+        number_sections = st.checkbox(
+            "Number Sections Automatically",
+            value=True,
+            key="gen_number_sections"
         )
-
-    # Show Pandoc-specific options if Pandoc is selected
-    if "Pandoc" in export_method:
-        pandoc_col1, pandoc_col2 = st.columns(2)
-
-        with pandoc_col1:
-            include_toc = st.checkbox(
-                "Include Table of Contents",
-                value=True,
-                key="gen_include_toc"
-            )
-
-        with pandoc_col2:
-            number_sections = st.checkbox(
-                "Number Sections Automatically",
-                value=True,
-                key="gen_number_sections"
-            )
-    else:
-        include_toc = False
-        number_sections = False
 
     st.markdown("---")
     # ----------------------------
@@ -479,8 +310,7 @@ def Document_Generator():
                 "use_rag": True,
                 "top_k": 5,
                 "doc_title": out_name,
-                "include_test_cards": include_test_cards,
-                "export_format": "pandoc" if "Pandoc" in export_method else "python-docx",
+                "export_format": "pandoc",  # Always use Pandoc for professional formatting
                 "include_toc": include_toc,
                 "number_sections": number_sections
             }

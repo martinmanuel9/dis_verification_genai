@@ -24,6 +24,13 @@ from repositories.citation_repository import CitationRepository
 # Note: Function calls to log_agent_session, log_agent_response, etc.
 # need to be migrated to use repository methods (similar to agent_service.py)
 from repositories.chat_repository import ChatRepository
+from services.database import (
+    log_agent_session,
+    complete_agent_session,
+    log_agent_response,
+    log_compliance_result,
+    log_rag_citations
+)
 
 logger = logging.getLogger("RAG_SERVICE_LOGGER")
 

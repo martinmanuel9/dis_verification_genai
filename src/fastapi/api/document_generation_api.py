@@ -26,6 +26,7 @@ import base64
 import redis
 from datetime import datetime
 import asyncio
+import json
 from schemas.test_card import (
     TestCardRequest,
     TestCardResponse,
@@ -34,8 +35,11 @@ from schemas.test_card import (
     ExportTestPlanWithCardsRequest,
     ExportTestPlanWithCardsResponse,
 )
+from integrations.chromadb_client import get_chroma_client
+from tasks.test_card_tasks import generate_test_cards as generate_test_cards_task
 
 logger = logging.getLogger("DOC_GEN_API_LOGGER")
+chroma_client = get_chroma_client()
 doc_gen_api_router = APIRouter(prefix="/doc_gen", tags=["doc_gen"])
 
 class GenerateRequest(BaseModel):
@@ -224,20 +228,27 @@ def _run_generation_background(
                 "chromadb_saved": str(meta.get("chromadb_saved", False))
             }
 
-            # Save result to Redis
-            redis_client.hset(f"pipeline:{pipeline_id}:result", mapping=result_data)
-            redis_client.expire(f"pipeline:{pipeline_id}:result", 604800)  # 7 days
+            # Use Redis pipeline for atomic operations
+            # This ensures result is saved BEFORE status is set to completed
+            pipe = redis_client.pipeline()
+
+            # Save result
+            pipe.hset(f"pipeline:{pipeline_id}:result", mapping=result_data)
+            pipe.expire(f"pipeline:{pipeline_id}:result", 604800)  # 7 days
 
             # Update status to completed
             now = datetime.now().isoformat()
-            redis_client.hset(f"pipeline:{pipeline_id}:meta", mapping={
+            pipe.hset(f"pipeline:{pipeline_id}:meta", mapping={
                 "status": "completed",
                 "completed_at": now,
                 "last_updated_at": now,
                 "progress_message": "Generation completed successfully"
             })
 
-            logger.info(f"Result saved to Redis for pipeline {pipeline_id}")
+            # Execute all commands atomically
+            pipe.execute()
+
+            logger.info(f"Result saved atomically to Redis for pipeline {pipeline_id}")
             return doc
         else:
             raise ValueError("No documents generated")
@@ -376,14 +387,19 @@ async def get_generation_status(pipeline_id: str):
         }
 
         # If failed, include error
-        if meta.get("status") == "failed":
+        if meta.get("status", "").upper() == "FAILED":
             progress_info["error"] = meta.get("error", "Unknown error")
 
-        # If completed, check if result is available
-        if meta.get("status") == "completed":
+        # If completed, check if result is available and include document info
+        if meta.get("status", "").upper() == "COMPLETED":
             result_exists = redis_client.exists(f"pipeline:{pipeline_id}:result")
             progress_info["result_available"] = bool(result_exists)
             progress_info["completed_at"] = meta.get("completed_at", "")
+
+            # Include document_id and collection_name from metadata
+            if meta.get("generated_document_id"):
+                progress_info["document_id"] = meta.get("generated_document_id")
+                progress_info["collection_name"] = meta.get("collection", "generated_test_plan")
 
         return progress_info
 
@@ -407,8 +423,8 @@ async def get_generation_result(pipeline_id: str):
         if not meta:
             raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or expired")
 
-        status = meta.get("status", "")
-        if status != "completed":
+        status = meta.get("status", "").upper()
+        if status != "COMPLETED":
             raise HTTPException(
                 status_code=400,
                 detail=f"Pipeline is not completed yet. Current status: {status}"
@@ -427,7 +443,11 @@ async def get_generation_result(pipeline_id: str):
                 "total_sections": int(result.get("total_sections", 0)),
                 "total_requirements": int(result.get("total_requirements", 0)),
                 "total_test_procedures": int(result.get("total_test_procedures", 0)),
-                "pipeline_id": pipeline_id
+                "pipeline_id": pipeline_id,
+                "document_id": result.get("document_id", ""),
+                "collection_name": result.get("collection_name", "generated_test_plan"),
+                "generated_at": result.get("generated_at", ""),
+                "chromadb_saved": result.get("chromadb_saved", "False").lower() == "true"
             }]
         }
 
@@ -503,9 +523,10 @@ async def cancel_pipeline(pipeline_id: str):
             raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or expired")
 
         current_status = meta.get("status", "")
+        current_status_upper = current_status.upper()
 
         # Can only cancel queued or processing pipelines
-        if current_status not in ["queued", "processing"]:
+        if current_status_upper not in ["QUEUED", "PROCESSING"]:
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot cancel pipeline with status '{current_status}'. Only queued or processing pipelines can be cancelled."
@@ -1672,3 +1693,1144 @@ async def _add_test_cards_to_markdown(
         logger.error(f"Failed to add test cards to markdown: {e}")
         # Return original markdown on error
         return markdown
+
+
+# ============================================================================
+# TEST CARD DOCUMENT MANAGEMENT (New Design - Separate Documents)
+# ============================================================================
+
+class GenerateTestCardsFromPlanRequest(BaseModel):
+    """Request to generate test card documents from a test plan"""
+    test_plan_id: str
+    collection_name: str = "generated_test_plan"
+    format: str = "markdown_table"  # markdown_table, json, docx_table
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_plan_id": "testplan_multiagent_pipeline_abc123_def456",
+                "collection_name": "generated_test_plan",
+                "format": "markdown_table"
+            }
+        }
+
+
+class GenerateTestCardsFromPlanResponse(BaseModel):
+    """Response from test card generation"""
+    test_plan_id: str
+    test_plan_title: str
+    test_cards_generated: int
+    test_cards: List[Dict[str, Any]]
+    chromadb_saved: bool
+    collection_name: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_plan_id": "testplan_multiagent_pipeline_abc123",
+                "test_plan_title": "System Integration Test Plan",
+                "test_cards_generated": 25,
+                "test_cards": [
+                    {
+                        "document_id": "testcard_testplan_abc123_TC-001_xyz789",
+                        "document_name": "TC-001 Power Supply Voltage Test",
+                        "test_id": "TC-001"
+                    }
+                ],
+                "chromadb_saved": True,
+                "collection_name": "test_cards"
+            }
+        }
+
+
+class QueryTestCardsRequest(BaseModel):
+    """Request to query test cards"""
+    test_plan_id: Optional[str] = None
+    execution_status: Optional[str] = None  # not_executed, passed, failed, in_progress
+    collection_name: str = "test_cards"
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_plan_id": "testplan_multiagent_pipeline_abc123",
+                "execution_status": "not_executed",
+                "collection_name": "test_cards"
+            }
+        }
+
+
+class QueryTestCardsResponse(BaseModel):
+    """Response from test card query"""
+    test_cards: List[Dict[str, Any]]
+    total_count: int
+    filters_applied: Dict[str, Any]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_cards": [
+                    {
+                        "document_id": "testcard_abc123_TC-001_xyz",
+                        "document_name": "TC-001 Voltage Test",
+                        "test_id": "TC-001",
+                        "execution_status": "not_executed",
+                        "test_plan_id": "testplan_abc123"
+                    }
+                ],
+                "total_count": 25,
+                "filters_applied": {
+                    "test_plan_id": "testplan_abc123",
+                    "execution_status": "not_executed"
+                }
+            }
+        }
+
+
+class BulkUpdateTestCardsRequest(BaseModel):
+    """Request to bulk update test cards"""
+    collection_name: str = "test_cards"
+    updates: List[Dict[str, Any]]  # List of {document_id, updates: {...}}
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "collection_name": "test_cards",
+                "updates": [
+                    {
+                        "document_id": "testcard_abc123_TC-001_xyz",
+                        "updates": {
+                            "execution_status": "completed",
+                            "passed": "true",
+                            "notes": "Test completed successfully"
+                        }
+                    }
+                ]
+            }
+        }
+
+
+class BulkUpdateTestCardsResponse(BaseModel):
+    """Response from bulk update operation"""
+    updated_count: int
+    failed_count: int
+    errors: List[str]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "updated_count": 5,
+                "failed_count": 0,
+                "errors": []
+            }
+        }
+
+
+class UpdateTestCardExecutionRequest(BaseModel):
+    """Request to update test card execution status"""
+    execution_status: str  # not_executed, in_progress, passed, failed
+    executed_by: Optional[str] = None
+    notes: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "execution_status": "passed",
+                "executed_by": "John Smith",
+                "notes": "All criteria met. Test passed successfully."
+            }
+        }
+
+
+class UpdateTestCardExecutionResponse(BaseModel):
+    """Response from test card execution update"""
+    document_id: str
+    updated: bool
+    message: str
+    execution_status: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "document_id": "testcard_abc123_TC-001_xyz",
+                "updated": True,
+                "message": "Test card execution status updated successfully",
+                "execution_status": "passed"
+            }
+        }
+
+
+@doc_gen_api_router.post("/generate-test-cards-from-plan", response_model=GenerateTestCardsFromPlanResponse)
+async def generate_test_cards_from_plan(
+    req: GenerateTestCardsFromPlanRequest,
+    test_card_service: TestCardService = Depends(get_test_card_service)
+):
+    """
+    Generate individual test card documents from a test plan stored in ChromaDB.
+
+    Each test procedure in the test plan becomes a separate test card document
+    stored in the 'test_cards' collection with execution tracking metadata.
+
+    Args:
+        req: Request with test_plan_id and collection details
+
+    Returns:
+        List of generated test cards with document IDs
+
+    Example:
+        Test Plan with 10 test procedures → 10 separate test card documents
+    """
+    try:
+        logger.info(f"Generating test cards from test plan: {req.test_plan_id}")
+        logger.info(f"Looking in collection: {req.collection_name}")
+
+        # Fetch test plan from ChromaDB via FastAPI vectordb API
+        fastapi_url = os.getenv("FASTAPI_URL", "http://localhost:9020")
+        response = requests.get(
+            f"{fastapi_url}/api/vectordb/documents",
+            params={"collection_name": req.collection_name},
+            timeout=30
+        )
+
+        logger.info(f"ChromaDB response status: {response.status_code}")
+
+        if not response.ok:
+            logger.error(f"Failed to fetch from ChromaDB: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to fetch test plan from collection '{req.collection_name}': {response.text}"
+            )
+
+        data = response.json()
+        ids = data.get("ids", [])
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+
+        logger.info(f"Found {len(ids)} documents in collection '{req.collection_name}'")
+        if len(ids) > 0:
+            logger.info(f"Sample document IDs: {ids[:5]}")
+            logger.info(f"Looking for document ID: {req.test_plan_id}")
+
+        # Find the test plan document with fallback search
+        idx = None
+
+        # Try 1: Exact ID match
+        try:
+            idx = ids.index(req.test_plan_id)
+            logger.info(f"✓ Found test plan by exact ID match at index {idx}")
+        except ValueError:
+            logger.warning(f"Exact ID match failed for '{req.test_plan_id}'")
+
+            # Try 2: Case-insensitive ID match
+            for i, doc_id in enumerate(ids):
+                if doc_id.lower() == req.test_plan_id.lower():
+                    idx = i
+                    logger.info(f"✓ Found test plan by case-insensitive ID match at index {idx}")
+                    break
+
+            # Try 3: Partial ID match (useful if UI sends shortened ID)
+            if idx is None:
+                for i, doc_id in enumerate(ids):
+                    if req.test_plan_id in doc_id or doc_id in req.test_plan_id:
+                        idx = i
+                        logger.info(f"✓ Found test plan by partial ID match: '{doc_id}' at index {idx}")
+                        break
+
+            # Try 4: Match by document title in metadata
+            if idx is None:
+                logger.info("Attempting to find document by title match...")
+                for i, metadata in enumerate(metadatas):
+                    if metadata:
+                        doc_title = metadata.get("title", "").lower()
+                        search_term = req.test_plan_id.lower().replace("_", " ")
+                        if doc_title and search_term in doc_title:
+                            idx = i
+                            logger.info(f"✓ Found test plan by title match: '{metadata.get('title')}' at index {idx}")
+                            break
+
+        # If still not found, provide helpful error
+        if idx is None:
+            logger.error(f"Test plan '{req.test_plan_id}' not found in collection '{req.collection_name}'")
+
+            # Build helpful error message with available options
+            available_docs = []
+            for doc_id, metadata in zip(ids[:10], metadatas[:10]):  # Show first 10
+                title = metadata.get("title", "Untitled") if metadata else "Untitled"
+                available_docs.append(f"- ID: {doc_id}, Title: {title}")
+
+            available_list = "\n".join(available_docs)
+
+            error_detail = (
+                f"Test plan '{req.test_plan_id}' not found in collection '{req.collection_name}'.\n\n"
+                f"Available test plans ({len(ids)} total, showing first 10):\n{available_list}\n\n"
+                f"Tips:\n"
+                f"- Copy the exact Document ID from the 'View Test Plans' tab\n"
+                f"- Document IDs are case-sensitive\n"
+                f"- Make sure the test plan was successfully saved to ChromaDB"
+            )
+
+            logger.error(f"Available document IDs: {ids[:10]}")
+            raise HTTPException(
+                status_code=404,
+                detail=error_detail
+            )
+
+        test_plan_content = documents[idx]
+        test_plan_metadata = metadatas[idx] or {}
+        test_plan_title = test_plan_metadata.get("title", "Test Plan")
+
+        logger.info(f"Found test plan: {test_plan_title}")
+
+        # Generate test card documents
+        test_cards = await run_in_threadpool(
+            test_card_service.generate_test_cards_from_test_plan,
+            test_plan_id=req.test_plan_id,
+            test_plan_content=test_plan_content,
+            test_plan_title=test_plan_title,
+            format=req.format
+        )
+
+        if not test_cards:
+            raise HTTPException(
+                status_code=400,
+                detail="No test procedures found in test plan. Unable to generate test cards."
+            )
+
+        logger.info(f"Generated {len(test_cards)} test card documents")
+
+        # Save test cards to ChromaDB
+        save_result = await run_in_threadpool(
+            test_card_service.save_test_cards_to_chromadb,
+            test_cards=test_cards,
+            collection_name="test_cards"
+        )
+
+        # Prepare response
+        test_card_summary = [
+            {
+                "document_id": card["document_id"],
+                "document_name": card["document_name"],
+                "test_id": card["metadata"]["test_id"],
+                "section_title": card["metadata"]["section_title"]
+            }
+            for card in test_cards
+        ]
+
+        logger.info(f"Test cards saved to ChromaDB: {save_result.get('saved', False)}")
+
+        return GenerateTestCardsFromPlanResponse(
+            test_plan_id=req.test_plan_id,
+            test_plan_title=test_plan_title,
+            test_cards_generated=len(test_cards),
+            test_cards=test_card_summary,
+            chromadb_saved=save_result.get("saved", False),
+            collection_name=save_result.get("collection_name", "test_cards")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate test cards from plan: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Test card generation failed: {str(e)}")
+
+
+# ============================================================================
+# TEST CARD GENERATION - ASYNC/BACKGROUND VERSION
+# ============================================================================
+
+@doc_gen_api_router.post("/generate-test-cards-from-plan-async")
+async def generate_test_cards_from_plan_async(
+    req: GenerateTestCardsFromPlanRequest
+):
+    """
+    Start test card generation as a Celery background task (no timeout).
+    Returns job_id immediately for progress tracking.
+
+    This endpoint uses Celery for proper distributed task processing,
+    ideal for large test plans that may take several minutes to process.
+    """
+    try:
+        logger.info(f"Starting async test card generation for test plan: {req.test_plan_id}")
+
+        # Generate job_id upfront
+        job_id = f"testcard_job_{uuid.uuid4().hex[:12]}"
+
+        # Initialize job metadata in Redis
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        now = datetime.now().isoformat()
+        job_meta = {
+            "job_id": job_id,
+            "test_plan_id": req.test_plan_id,
+            "test_plan_title": "",  # Will be updated when plan is loaded
+            "collection_name": req.collection_name,
+            "format": req.format,
+            "status": "queued",
+            "created_at": now,
+            "last_updated_at": now,
+            "progress_message": "Test card generation queued - waiting for Celery worker...",
+            "sections_processed": "0",
+            "total_sections": "0",
+            "test_cards_generated": "0",
+            "celery_task_id": ""  # Will be updated when task starts
+        }
+        redis_client.hset(f"testcard_job:{job_id}:meta", mapping=job_meta)
+        redis_client.expire(f"testcard_job:{job_id}:meta", 604800)  # 7 days
+
+        # Submit task to Celery
+        celery_task = generate_test_cards_task.apply_async(
+            args=[job_id, req.test_plan_id, req.collection_name, req.format],
+            task_id=f"celery_{job_id}",  # Use custom task ID for easier tracking
+        )
+
+        # Update metadata with Celery task ID
+        redis_client.hset(f"testcard_job:{job_id}:meta", "celery_task_id", celery_task.id)
+
+        logger.info(f"Celery task queued: {job_id} (Celery Task ID: {celery_task.id})")
+
+        return {
+            "job_id": job_id,
+            "test_plan_id": req.test_plan_id,
+            "status": "queued",
+            "message": "Test card generation started in Celery queue. Use /test-card-generation-status/{job_id} to check progress.",
+            "collection_name": req.collection_name,
+            "celery_task_id": celery_task.id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to start async test card generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start job: {str(e)}")
+
+
+# ============================================================================
+# NOTE: Old BackgroundTasks implementation (replaced by Celery)
+# The old function _run_test_card_generation_background has been removed
+# in favor of the Celery-based approach using tasks/test_card_tasks.py
+# ============================================================================
+
+
+@doc_gen_api_router.get("/list-test-card-jobs")
+async def list_test_card_jobs(limit: int = 50):
+    """List all active and recent test card generation jobs"""
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Get all test card job metadata keys
+        job_keys = redis_client.keys("testcard_job:*:meta")
+
+        jobs = []
+        for key in job_keys[:limit]:
+            # Extract job_id from key (format: testcard_job:JOB_ID:meta)
+            job_id = key.replace("testcard_job:", "").replace(":meta", "")
+
+            # Get metadata
+            meta = redis_client.hgetall(key)
+
+            if meta:
+                # Check if result exists
+                result_exists = redis_client.exists(f"testcard_job:{job_id}:result")
+
+                jobs.append({
+                    "job_id": job_id,
+                    "status": meta.get("status", "unknown"),
+                    "test_plan_id": meta.get("test_plan_id", ""),
+                    "test_plan_title": meta.get("test_plan_title", "Untitled"),
+                    "created_at": meta.get("created_at", ""),
+                    "progress_message": meta.get("progress_message", ""),
+                    "test_cards_generated": meta.get("test_cards_generated", "0"),
+                    "result_available": bool(result_exists)
+                })
+
+        # Sort by created_at descending (most recent first)
+        jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+        return {
+            "jobs": jobs,
+            "total": len(jobs)
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing test card jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.get("/test-card-generation-status/{job_id}")
+async def get_test_card_generation_status(job_id: str):
+    """Get the status of a test card generation job"""
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Get metadata
+        meta = redis_client.hgetall(f"testcard_job:{job_id}:meta")
+
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found or expired")
+
+        # Build progress info
+        progress_info = {
+            "job_id": job_id,
+            "test_plan_id": meta.get("test_plan_id", ""),
+            "test_plan_title": meta.get("test_plan_title", ""),
+            "status": meta.get("status", "unknown"),
+            "created_at": meta.get("created_at", ""),
+            "progress_message": meta.get("progress_message", ""),
+            "sections_processed": meta.get("sections_processed", "0"),
+            "total_sections": meta.get("total_sections", "0"),
+            "test_cards_generated": meta.get("test_cards_generated", "0")
+        }
+
+        # If failed, include error
+        if meta.get("status", "").lower() == "failed":
+            progress_info["error"] = meta.get("error", "Unknown error")
+
+        # If completed, check if result is available
+        if meta.get("status", "").lower() == "completed":
+            result_exists = redis_client.exists(f"testcard_job:{job_id}:result")
+            progress_info["result_available"] = bool(result_exists)
+            progress_info["completed_at"] = meta.get("completed_at", "")
+
+        return progress_info
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking status for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.get("/test-card-generation-result/{job_id}")
+async def get_test_card_generation_result(job_id: str):
+    """Get the completed result from a test card generation job"""
+    try:
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # Check status first
+        meta = redis_client.hgetall(f"testcard_job:{job_id}:meta")
+
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found or expired")
+
+        status = meta.get("status", "").lower()
+
+        if status != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job is not completed yet. Current status: {status}. Use /test-card-generation-status/{job_id} to check progress."
+            )
+
+        # Get result
+        result = redis_client.hgetall(f"testcard_job:{job_id}:result")
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Result for job {job_id} not found. It may have expired."
+            )
+
+        # Parse test cards JSON
+        test_cards_json = result.get("test_cards", "[]")
+        test_cards = json.loads(test_cards_json)
+
+        return {
+            "test_plan_id": result.get("test_plan_id", ""),
+            "test_plan_title": result.get("test_plan_title", ""),
+            "test_cards_generated": int(result.get("test_cards_generated", 0)),
+            "test_cards": test_cards,
+            "chromadb_saved": result.get("chromadb_saved", "false").lower() == "true",
+            "collection_name": result.get("collection_name", "test_cards")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving result for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@doc_gen_api_router.post("/query-test-cards", response_model=QueryTestCardsResponse)
+async def query_test_cards(req: QueryTestCardsRequest):
+    """
+    Query test card documents by test_plan_id, execution_status, or other filters.
+
+    Args:
+        req: Query parameters (test_plan_id, execution_status, etc.)
+
+    Returns:
+        List of test cards matching the filters
+
+    Example:
+        Get all test cards for a test plan:
+        {"test_plan_id": "testplan_abc123"}
+
+        Get all failed test cards:
+        {"execution_status": "failed"}
+    """
+    try:
+        logger.info(f"Querying test cards with filters: test_plan_id={req.test_plan_id}, "
+                   f"execution_status={req.execution_status}")
+
+        # Fetch test cards from ChromaDB via FastAPI vectordb API
+        # Use ChromaDB client directly for better performance with filters
+        from integrations.chromadb_client import get_chroma_client
+        chroma_client = get_chroma_client()
+
+        try:
+            collection = chroma_client.get_collection(name=req.collection_name)
+        except Exception as e:
+            logger.info(f"Collection '{req.collection_name}' not found: {e}")
+            return QueryTestCardsResponse(
+                test_cards=[],
+                total_count=0,
+                filters_applied={"test_plan_id": req.test_plan_id, "execution_status": req.execution_status}
+            )
+
+        # Build ChromaDB where clause for efficient filtering
+        where = {}
+        if req.test_plan_id:
+            where["test_plan_id"] = req.test_plan_id
+        if req.execution_status:
+            where["execution_status"] = req.execution_status
+
+        # Query ChromaDB with filters (much faster than fetching all and filtering)
+        if where:
+            result = collection.get(
+                where=where,
+                limit=1000,  # Reasonable limit
+                include=["documents", "metadatas"]
+            )
+        else:
+            # If no filters, get recent test cards only
+            result = collection.get(
+                limit=100,  # Default limit when no filters
+                include=["documents", "metadatas"]
+            )
+
+        ids = result.get("ids", [])
+        documents = result.get("documents", [])
+        metadatas = result.get("metadatas", [])
+
+        # Build response from ChromaDB results (already filtered)
+        filtered_cards = []
+        for doc_id, content, metadata in zip(ids, documents, metadatas):
+            metadata = metadata or {}
+
+            # Build test card object
+            filtered_cards.append({
+                "document_id": doc_id,
+                "document_name": metadata.get("document_name", ""),
+                "test_id": metadata.get("test_id", ""),
+                "test_plan_id": metadata.get("test_plan_id", ""),
+                "test_plan_title": metadata.get("test_plan_title", ""),
+                "section_title": metadata.get("section_title", ""),
+                "requirement_id": metadata.get("requirement_id", ""),
+                "requirement_text": metadata.get("requirement_text", ""),
+                "execution_status": metadata.get("execution_status", "not_executed"),
+                "executed_by": metadata.get("executed_by", ""),
+                "passed": metadata.get("passed", False),
+                "failed": metadata.get("failed", False),
+                "notes": metadata.get("notes", ""),
+                "content_preview": content[:200] + "..." if len(content) > 200 else content,
+                "content": content  # Include full content for editing
+            })
+
+        logger.info(f"Found {len(filtered_cards)} test cards matching filters")
+
+        return QueryTestCardsResponse(
+            test_cards=filtered_cards,
+            total_count=len(filtered_cards),
+            filters_applied={
+                "test_plan_id": req.test_plan_id,
+                "execution_status": req.execution_status,
+                "collection_name": req.collection_name
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to query test cards: {e}")
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+@doc_gen_api_router.get("/test-cards/{card_id}")
+async def get_test_card(card_id: str, collection_name: str = "test_cards"):
+    """
+    Retrieve a single test card by document ID.
+
+    Args:
+        card_id: Test card document ID
+        collection_name: ChromaDB collection name (default: test_cards)
+
+    Returns:
+        Complete test card document with all metadata and content
+    """
+    try:
+        logger.info(f"Retrieving test card: {card_id}")
+
+        # Fetch from ChromaDB via FastAPI vectordb API
+        fastapi_url = os.getenv("FASTAPI_URL", "http://localhost:9020")
+        response = requests.get(
+            f"{fastapi_url}/api/vectordb/documents",
+            params={"collection_name": collection_name},
+            timeout=30
+        )
+
+        if not response.ok:
+            logger.error(f"Failed to fetch test cards: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to fetch test cards: {response.text}"
+            )
+
+        data = response.json()
+        ids = data.get("ids", [])
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+
+        # Find the test card
+        try:
+            idx = ids.index(card_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Test card '{card_id}' not found in collection '{collection_name}'"
+            )
+
+        content = documents[idx]
+        metadata = metadatas[idx] or {}
+
+        return {
+            "document_id": card_id,
+            "document_name": metadata.get("document_name", ""),
+            "content": content,
+            "metadata": metadata,
+            "test_id": metadata.get("test_id", ""),
+            "test_plan_id": metadata.get("test_plan_id", ""),
+            "test_plan_title": metadata.get("test_plan_title", ""),
+            "section_title": metadata.get("section_title", ""),
+            "execution_status": metadata.get("execution_status", "not_executed"),
+            "executed_by": metadata.get("executed_by", ""),
+            "passed": metadata.get("passed", False),
+            "failed": metadata.get("failed", False),
+            "notes": metadata.get("notes", "")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve test card: {e}")
+        raise HTTPException(status_code=500, detail=f"Retrieval failed: {str(e)}")
+
+
+@doc_gen_api_router.put("/test-cards/{card_id}/execute", response_model=UpdateTestCardExecutionResponse)
+async def update_test_card_execution(
+    card_id: str,
+    req: UpdateTestCardExecutionRequest,
+    collection_name: str = "test_cards"
+):
+    """
+    Update test card execution status and tracking information.
+
+    Supports marking test cards as:
+    - not_executed
+    - in_progress
+    - passed
+    - failed
+
+    Args:
+        card_id: Test card document ID
+        req: Execution update details (status, executed_by, notes)
+        collection_name: ChromaDB collection name (default: test_cards)
+
+    Returns:
+        Updated test card status
+    """
+    try:
+        logger.info(f"Updating test card execution: {card_id} → {req.execution_status}")
+
+        # Validate execution_status
+        valid_statuses = ["not_executed", "in_progress", "passed", "failed"]
+        if req.execution_status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid execution_status. Must be one of: {', '.join(valid_statuses)}"
+            )
+
+        # Fetch current test card via FastAPI vectordb API
+        fastapi_url = os.getenv("FASTAPI_URL", "http://localhost:9020")
+        response = requests.get(
+            f"{fastapi_url}/api/vectordb/documents",
+            params={"collection_name": collection_name},
+            timeout=30
+        )
+
+        if not response.ok:
+            logger.error(f"Failed to fetch test cards: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to fetch test cards: {response.text}"
+            )
+
+        data = response.json()
+        ids = data.get("ids", [])
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+
+        # Find the test card
+        try:
+            idx = ids.index(card_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Test card '{card_id}' not found in collection '{collection_name}'"
+            )
+
+        # Update metadata
+        current_metadata = metadatas[idx] or {}
+        updated_metadata = current_metadata.copy()
+
+        updated_metadata["execution_status"] = req.execution_status
+        updated_metadata["passed"] = req.execution_status == "passed"
+        updated_metadata["failed"] = req.execution_status == "failed"
+
+        if req.executed_by:
+            updated_metadata["executed_by"] = req.executed_by
+
+        if req.notes:
+            updated_metadata["notes"] = req.notes
+
+        updated_metadata["last_updated"] = datetime.now().isoformat()
+
+        # Update in ChromaDB via FastAPI vectordb API
+        update_payload = {
+            "collection_name": collection_name,
+            "ids": [card_id],
+            "metadatas": [updated_metadata]
+        }
+
+        update_response = requests.post(
+            f"{fastapi_url}/api/vectordb/documents/update",
+            json=update_payload,
+            timeout=30
+        )
+
+        if not update_response.ok:
+            logger.error(f"Failed to update test card: {update_response.status_code} - {update_response.text}")
+            raise HTTPException(
+                status_code=update_response.status_code,
+                detail=f"Failed to update test card: {update_response.text}"
+            )
+
+        logger.info(f"Test card {card_id} updated successfully")
+
+        return UpdateTestCardExecutionResponse(
+            document_id=card_id,
+            updated=True,
+            message=f"Test card execution status updated to '{req.execution_status}'",
+            execution_status=req.execution_status
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update test card execution: {e}")
+        raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+
+@doc_gen_api_router.post("/test-cards/export-docx")
+async def export_test_cards_to_docx(req: QueryTestCardsRequest):
+    """
+    Export test cards to a DOCX file.
+    Filters test cards by test_plan_id and exports them to a downloadable Word document.
+
+    Args:
+        req: Query parameters (test_plan_id, execution_status, collection_name)
+
+    Returns:
+        Word document as downloadable file
+    """
+    from fastapi.responses import Response
+    
+    try:
+        logger.info(f"Exporting test cards to DOCX for test_plan_id={req.test_plan_id}")
+
+        # Query test cards (reuse query logic)
+        from integrations.chromadb_client import get_chroma_client
+        chroma_client = get_chroma_client()
+
+        try:
+            collection = chroma_client.get_collection(name=req.collection_name)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Collection not found: {e}")
+
+        # Build where clause
+        where = {}
+        if req.test_plan_id:
+            where["test_plan_id"] = req.test_plan_id
+        if req.execution_status:
+            where["execution_status"] = req.execution_status
+
+        # Query ChromaDB
+        if where:
+            result = collection.get(
+                where=where,
+                limit=1000,
+                include=["documents", "metadatas"]
+            )
+        else:
+            result = collection.get(
+                limit=100,
+                include=["documents", "metadatas"]
+            )
+
+        ids = result.get("ids", [])
+        documents = result.get("documents", [])
+        metadatas = result.get("metadatas", [])
+
+        if not ids:
+            raise HTTPException(status_code=404, detail="No test cards found matching filters")
+
+        # Build test cards list for export
+        test_cards = []
+        for doc_id, content, metadata in zip(ids, documents, metadatas):
+            test_cards.append({
+                "document_id": doc_id,
+                "content": content,
+                "metadata": metadata or {}
+            })
+
+        # Get test plan title
+        test_plan_title = metadatas[0].get("test_plan_title", "Test Plan") if metadatas else "Test Plan"
+
+        # Export to DOCX
+        word_export_service = WordExportService()
+        docx_bytes = word_export_service.export_test_cards_to_word(test_cards, test_plan_title)
+
+        # Create filename
+        plan_id_safe = req.test_plan_id or "all"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"test_cards_{plan_id_safe}_{timestamp}.docx"
+
+        logger.info(f"Exported {len(test_cards)} test cards to DOCX: {filename}")
+
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{filename}\""
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export test cards to DOCX: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@doc_gen_api_router.post("/test-cards/export-markdown")
+async def export_test_cards_to_markdown(req: QueryTestCardsRequest):
+    """
+    Export test cards to a Markdown file.
+    Filters test cards by test_plan_id and exports them to a downloadable Markdown document.
+
+    Args:
+        req: Query parameters (test_plan_id, execution_status, collection_name)
+
+    Returns:
+        Markdown document as downloadable file
+    """
+    from fastapi.responses import Response
+
+    try:
+        logger.info(f"Exporting test cards to Markdown for test_plan_id={req.test_plan_id}")
+
+        # Query test cards (reuse query logic)
+        from integrations.chromadb_client import get_chroma_client
+        chroma_client = get_chroma_client()
+
+        try:
+            collection = chroma_client.get_collection(name=req.collection_name)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Collection not found: {e}")
+
+        # Build where clause
+        where = {}
+        if req.test_plan_id:
+            where["test_plan_id"] = req.test_plan_id
+        if req.execution_status:
+            where["execution_status"] = req.execution_status
+
+        # Query ChromaDB
+        if where:
+            result = collection.get(
+                where=where,
+                limit=1000,
+                include=["documents", "metadatas"]
+            )
+        else:
+            result = collection.get(
+                limit=100,
+                include=["documents", "metadatas"]
+            )
+
+        ids = result.get("ids", [])
+        documents = result.get("documents", [])
+        metadatas = result.get("metadatas", [])
+
+        if not ids:
+            raise HTTPException(status_code=404, detail="No test cards found matching filters")
+
+        # Get test plan title
+        test_plan_title = metadatas[0].get("test_plan_title", "Test Plan") if metadatas else "Test Plan"
+
+        # Build markdown content
+        markdown_content = f"# {test_plan_title} - Test Cards\n\n"
+        markdown_content += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        markdown_content += f"Total Test Cards: {len(ids)}\n\n"
+        markdown_content += "---\n\n"
+
+        # Group by section if available
+        sections = {}
+        for doc_id, content, metadata in zip(ids, documents, metadatas):
+            section_title = metadata.get("section_title", "Uncategorized")
+            if section_title not in sections:
+                sections[section_title] = []
+
+            sections[section_title].append({
+                "test_id": metadata.get("test_id", ""),
+                "requirement_text": metadata.get("requirement_text", ""),
+                "content": content,
+                "execution_status": metadata.get("execution_status", "not_executed"),
+                "passed": metadata.get("passed", False),
+                "failed": metadata.get("failed", False),
+                "notes": metadata.get("notes", "")
+            })
+
+        # Write sections
+        for section_title, cards in sections.items():
+            markdown_content += f"## {section_title}\n\n"
+
+            for card in cards:
+                markdown_content += f"### Test Card: {card['test_id']}\n\n"
+                markdown_content += f"**Requirement:** {card['requirement_text']}\n\n"
+                markdown_content += f"**Status:** {card['execution_status']}\n\n"
+
+                if card['content']:
+                    markdown_content += f"{card['content']}\n\n"
+
+                if card['notes']:
+                    markdown_content += f"**Notes:** {card['notes']}\n\n"
+
+                markdown_content += "---\n\n"
+
+        # Create filename
+        plan_id_safe = req.test_plan_id or "all"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"test_cards_{plan_id_safe}_{timestamp}.md"
+
+        logger.info(f"Exported {len(ids)} test cards to Markdown: {filename}")
+
+        return Response(
+            content=markdown_content.encode('utf-8'),
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{filename}\""
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export test cards to Markdown: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@doc_gen_api_router.post("/test-cards/bulk-update", response_model=BulkUpdateTestCardsResponse)
+async def bulk_update_test_cards(req: BulkUpdateTestCardsRequest):
+    """
+    Bulk update test cards in ChromaDB.
+    Accepts a list of updates with document IDs and metadata changes.
+    """
+    try:
+        logger.info(f"Bulk updating {len(req.updates)} test cards in collection: {req.collection_name}")
+
+        collection = chroma_client.get_collection(name=req.collection_name)
+
+        updated_count = 0
+        failed_count = 0
+        errors = []
+
+        for update_item in req.updates:
+            document_id = update_item.get("document_id")
+            updates = update_item.get("updates", {})
+
+            if not document_id:
+                failed_count += 1
+                errors.append("Missing document_id in update item")
+                continue
+
+            try:
+                # Get existing document and metadata
+                existing = collection.get(ids=[document_id], include=["documents", "metadatas"])
+
+                if not existing["ids"]:
+                    failed_count += 1
+                    errors.append(f"Document not found: {document_id}")
+                    continue
+
+                # Separate content updates from metadata updates
+                content_update = updates.pop("content", None)
+
+                # Merge existing metadata with updates
+                existing_metadata = existing["metadatas"][0] if existing["metadatas"] else {}
+                updated_metadata = {**existing_metadata, **updates}
+
+                # Build update parameters
+                update_params = {
+                    "ids": [document_id],
+                    "metadatas": [updated_metadata]
+                }
+
+                # If content (test procedures) is being updated, include it
+                if content_update is not None:
+                    update_params["documents"] = [content_update]
+
+                # Update the document in ChromaDB
+                collection.update(**update_params)
+
+                updated_count += 1
+                logger.debug(f"Updated test card: {document_id}")
+
+            except Exception as e:
+                failed_count += 1
+                error_msg = f"Failed to update {document_id}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+
+        logger.info(f"Bulk update complete: {updated_count} updated, {failed_count} failed")
+
+        return BulkUpdateTestCardsResponse(
+            updated_count=updated_count,
+            failed_count=failed_count,
+            errors=errors
+        )
+
+    except Exception as e:
+        logger.error(f"Bulk update failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Bulk update failed: {str(e)}")
+

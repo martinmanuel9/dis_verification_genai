@@ -71,7 +71,9 @@ services:
       - base-poetry-deps
       - postgres
       - chromadb
-      - ollama
+      # ollama removed - using native Ollama on host at http://127.0.0.1:11434
+    extra_hosts:
+      - "host.docker.internal:172.19.0.1"  # ai_network bridge IP - allows access to host's Ollama
     volumes:
       - huggingface_cache:/app/huggingface_cache
       - ./data/huggingface_cache:/app/cache_backup
@@ -92,6 +94,8 @@ services:
       - .env
     depends_on:
       - base-poetry-deps
+    extra_hosts:
+      - "host.docker.internal:172.19.0.1"  # ai_network bridge IP - allows access to host's Ollama
     volumes:
       - ./src/llm_config:/app/llm_config:ro
       - ./stored_images:/app/stored_images:ro
@@ -115,38 +119,75 @@ services:
     networks:
       - ai_network
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    mem_limit: 6g
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    networks:
-      - ai_network
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-
-  ollama-init:
-    image: curlimages/curl:latest
-    container_name: ollama-init
-    depends_on:
-      ollama:
-        condition: service_healthy
-    volumes:
-      - ./scripts/init-ollama.sh:/init-ollama.sh:ro
-    networks:
-      - ai_network
+  celery-worker:
+    build:
+      context: ./src/fastapi
+      dockerfile: Dockerfile.fastapi
+    container_name: celery_worker
+    mem_limit: 2g
+    command: celery -A celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - .env
     environment:
-      - OLLAMA_MODELS=${OLLAMA_MODELS:-llama3.2:latest}
-    entrypoint: ["/bin/sh", "/init-ollama.sh"]
-    restart: "no"
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_REDIS_DB=1
+      - ANONYMIZED_TELEMETRY=False
+    depends_on:
+      - base-poetry-deps
+      - postgres
+      - chromadb
+      - redis
+      # ollama removed - using native Ollama on host
+    extra_hosts:
+      - "host.docker.internal:172.19.0.1"  # ai_network bridge IP - allows access to host's Ollama
+    volumes:
+      - huggingface_cache:/app/huggingface_cache
+      - ./data/huggingface_cache:/app/cache_backup
+      - ./src/llm_config:/app/llm_config:ro
+      - ./stored_images:/app/stored_images
+    networks:
+      - ai_network
+    restart: unless-stopped
+
+  # Ollama - DISABLED: Using native Ollama installation on host
+  # The native installation provides better GPU access and performance
+  # Native Ollama is available at: http://127.0.0.1:11434
+  # To re-enable Docker Ollama, uncomment this section and stop native service: sudo systemctl stop ollama
+  #ollama:
+  #  image: ollama/ollama:latest
+  #  container_name: ollama
+  #  mem_limit: 6g
+  #  restart: unless-stopped
+  #  ports:
+  #    - "11434:11434"
+  #  volumes:
+  #    - ollama-data:/root/.ollama
+  #  networks:
+  #    - ai_network
+  #  healthcheck:
+  #    test: ["CMD-SHELL", "ollama list || exit 1"]
+  #    interval: 30s
+  #    timeout: 10s
+  #    retries: 5
+  #    start_period: 40s
+
+  # Ollama Init - DISABLED: Using native Ollama installation
+  # Models should be pulled directly on host using: ollama pull <model-name>
+  #ollama-init:
+  #  image: curlimages/curl:latest
+  #  container_name: ollama-init
+  #  depends_on:
+  #    ollama:
+  #      condition: service_healthy
+  #  volumes:
+  #    - ./scripts/init-ollama.sh:/init-ollama.sh:ro
+  #  networks:
+  #    - ai_network
+  #  environment:
+  #    - OLLAMA_MODELS=${OLLAMA_MODELS:-llama3.2:latest}
+  #  entrypoint: ["/bin/sh", "/init-ollama.sh"]
+  #  restart: "no"
 
 networks:
   ai_network:

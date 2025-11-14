@@ -1,7 +1,6 @@
 """
-Test Card Viewer Component with DOCX Export
-Generate and display test cards directly from uploaded documents in vector database.
-Enhanced with Word document export capability.
+Test Card Viewer Component - Simplified
+Generate and execute test cards from test plans.
 """
 
 import streamlit as st
@@ -9,639 +8,718 @@ import pandas as pd
 import json
 from config.settings import config
 from lib.api.client import api_client
-from services.chromadb_service import chromadb_service
-import base64
 from datetime import datetime
-from docx import Document
-from docx.shared import Pt, Inches, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from io import BytesIO
-
-
-def create_test_card_docx(test_cards_data, metadata, doc_title):
-    """
-    Create a Word document with test card tables.
-
-    Args:
-        test_cards_data: Dictionary of section_title -> card_content
-        metadata: Test card metadata
-        doc_title: Document title
-
-    Returns:
-        BytesIO object containing the DOCX file
-    """
-    doc = Document()
-
-    # Add title
-    title = doc.add_heading(doc_title, 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    # Add metadata
-    doc.add_paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    doc.add_paragraph(f"Total Sections: {metadata.get('total_sections', 0)}")
-    doc.add_paragraph(f"Total Tests: {metadata.get('total_tests', 0)}")
-    doc.add_paragraph("")
-
-    # Add table of contents placeholder
-    doc.add_heading("Table of Contents", level=1)
-    doc.add_paragraph("(Update TOC in Word: Right-click → Update Field)")
-    doc.add_page_break()
-
-    # Process each section
-    for section_title, card_content in test_cards_data.items():
-        # Section heading
-        doc.add_heading(section_title, level=1)
-
-        # Try to parse as JSON for structured data
-        try:
-            test_cards = json.loads(card_content)
-
-            if test_cards and isinstance(test_cards, list):
-                # Create table with header row
-                table = doc.add_table(rows=1, cols=10)
-                table.style = 'Light Grid Accent 1'
-
-                # Header row
-                header_cells = table.rows[0].cells
-                headers = ['Test ID', 'Test Title', 'Procedures', 'Expected Results',
-                          'Acceptance Criteria', 'Dependencies', 'Executed', 'Pass', 'Fail', 'Notes']
-
-                for i, header in enumerate(headers):
-                    header_cells[i].text = header
-                    for paragraph in header_cells[i].paragraphs:
-                        for run in paragraph.runs:
-                            run.font.bold = True
-                            run.font.size = Pt(10)
-                            run.font.color.rgb = RGBColor(255, 255, 255)
-                    # Set header cell background
-                    header_cells[i]._element.get_or_add_tcPr().append(
-                        header_cells[i]._element.new_tag('w:shd', w_fill='4472C4')
-                    )
-
-                # Add test card rows
-                for tc in test_cards:
-                    row_cells = table.add_row().cells
-
-                    # Test ID
-                    row_cells[0].text = tc.get('test_id', 'N/A')
-
-                    # Test Title
-                    row_cells[1].text = tc.get('test_title', 'N/A')
-
-                    # Procedures (numbered list)
-                    procedures = tc.get('procedures', [])
-                    row_cells[2].text = '\n'.join([f"{i+1}. {p}" for i, p in enumerate(procedures)])
-
-                    # Expected Results
-                    row_cells[3].text = tc.get('expected_results', 'N/A')
-
-                    # Acceptance Criteria
-                    row_cells[4].text = tc.get('acceptance_criteria', 'N/A')
-
-                    # Dependencies
-                    deps = tc.get('dependencies', [])
-                    row_cells[5].text = ', '.join(deps) if deps else 'None'
-
-                    # Execution tracking columns (checkboxes)
-                    row_cells[6].text = ''
-                    row_cells[7].text = ''
-                    row_cells[8].text = ''
-                    row_cells[9].text = ''
-
-                    # Set font size for all cells in row
-                    for cell in row_cells:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                run.font.size = Pt(9)
-
-                # Add spacing after table
-                doc.add_paragraph("")
-
-        except (json.JSONDecodeError, TypeError):
-            # If not JSON or parse fails, treat as markdown
-            if card_content and len(card_content.strip()) > 50:
-                # Add markdown content as paragraph
-                doc.add_paragraph(card_content)
-            else:
-                doc.add_paragraph("No test cards found for this section.")
-
-        # Page break between sections
-        doc.add_page_break()
-
-    # Save to BytesIO
-    bio = BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-
-    return bio
+from components.job_status_monitor import JobStatusMonitor
 
 
 def TestCardViewer():
     """
-    Component for viewing and managing test cards and generated test plans.
-    Two modes: Generate new test cards OR view previously generated test plans.
+    Simplified component for managing test cards.
+    Two workflows: Generate test cards, Execute test cards.
     """
-    st.header("Test Cards & Generated Plans")
+    st.header("Test Cards")
 
-    # Tabs for different functionality
-    tab1, tab2 = st.tabs(["Generate Test Cards", "View Generated Test Plans"])
+    # Two simple tabs
+    tab1, tab2 = st.tabs([
+        "Generate Test Cards",
+        "Execute Test Cards"
+    ])
 
     with tab1:
         render_test_card_generator()
 
     with tab2:
-        render_generated_plans_viewer()
+        render_test_card_executor()
 
 
 def render_test_card_generator():
-    """Generate test cards from specification documents"""
+    """Generate test cards from a test plan - simplified workflow"""
     st.subheader("Generate Test Cards")
-    st.info("Generate executable test cards from uploaded specification documents (MIL-STD, ISO, etc.)")
-
-    # Get available collections
-    if "collections" not in st.session_state:
-        st.session_state.collections = chromadb_service.get_collections()
-
-    collections = st.session_state.collections
-
-    if not collections:
-        st.warning("No collections found. Please upload documents first in the Upload Documents page.")
-        return
-
-    # Collection selection
-    selected_collection = st.selectbox(
-        "Select Collection (containing specifications/standards):",
-        collections,
-        key="testcard_collection"
-    )
-
-    # Load documents from collection
-    if st.button("Load Documents", key="load_docs"):
-        with st.spinner(f"Loading documents from {selected_collection}..."):
-            try:
-                documents = chromadb_service.get_documents(selected_collection)
-                st.session_state.available_docs = [
-                    {
-                        'document_id': doc.document_id,
-                        'document_name': doc.document_name,
-                        'file_type': doc.file_type,
-                        'total_chunks': doc.total_chunks
-                    }
-                    for doc in documents
-                ]
-                st.success(f"Loaded {len(documents)} documents")
-            except Exception as e:
-                st.error(f"Failed to load documents: {e}")
-                st.session_state.available_docs = []
-
-    # Document selection
-    available_docs = st.session_state.get("available_docs", [])
-    if available_docs:
-        doc_options = {
-            f"{doc['document_name']} ({doc['file_type']}) - {doc['total_chunks']} chunks": doc['document_id']
-            for doc in available_docs
-        }
-
-        selected_docs = st.multiselect(
-            "Select Document(s) to Generate Test Cards From:",
-            list(doc_options.keys()),
-            key="testcard_selected_docs"
-        )
-
-        selected_doc_ids = [doc_options[name] for name in selected_docs]
-
-        if selected_doc_ids:
-            st.success(f"Selected {len(selected_doc_ids)} document(s)")
-        else:
-            st.info("Select at least one document to generate test cards")
-    else:
-        st.info("Click 'Load Documents' to see available documents")
-        st.stop()
-
-    if not selected_doc_ids:
-        st.warning("Please select at least one document to continue")
-        st.stop()
-
-    # Generate test plan first (which creates sections)
-    st.markdown("---")
-    st.subheader("Generate Test Plan with Test Cards")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        test_card_format = st.radio(
-            "Test Card Format:",
-            ["markdown_table", "json"],
-            horizontal=True,
-            key="testcard_format"
-        )
-    with col2:
-        doc_title = st.text_input(
-            "Test Plan Title:",
-            value="Test Plan",
-            key="testcard_doc_title"
-        )
-
-    generate_btn = st.button("Generate Test Plan & Cards", type="primary", key="generate_test_cards")
-
-    if generate_btn:
-        with st.spinner("Step 1/2: Generating test plan from documents... This may take several minutes."):
-            try:
-                # Step 1: Generate test plan using multi-agent service
-                test_plan_response = api_client.post(
-                    f"{config.endpoints.doc_gen}/generate_documents",
-                    data={
-                        "source_collections": [selected_collection],
-                        "source_doc_ids": selected_doc_ids,
-                        "doc_title": doc_title,
-                        "use_rag": True,
-                        "top_k": 5
-                    },
-                    # timeout=600  # 10 minutes for test plan generation
-                )
-
-                documents = test_plan_response.get("documents", [])
-                if not documents:
-                    st.error("No test plan generated. Please check your documents.")
-                    st.stop()
-
-                st.success(" Step 1/2: Test plan generated successfully!")
-
-            except Exception as e:
-                st.error(f" Failed to generate test plan: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-                st.stop()
-
-        with st.spinner("Step 2/2: Generating test cards from sections..."):
-            try:
-                # Step 2: Generate test cards from the document content
-                test_cards = {}
-
-                for doc in documents:
-                    section_title = doc.get('title', 'Document Section')
-                    content = doc.get('content', '')
-
-                    if content:
-                        # Call generate-test-card API for each section
-                        card_response = api_client.post(
-                            f"{config.endpoints.doc_gen}/generate-test-card",
-                            data={
-                                "section_title": section_title,
-                                "rules_markdown": content,
-                                "format": test_card_format
-                            },
-                            # timeout=180
-                        )
-
-                        test_cards[section_title] = card_response.get("test_card_content", "")
-
-                st.session_state.test_cards = test_cards
-                st.session_state.test_card_metadata = {
-                    "total_sections": len(test_cards),
-                    "total_tests": sum(
-                        len([line for line in content.split('\n') if line.strip().startswith('| TC-')])
-                        for content in test_cards.values()
-                    ) if test_card_format == "markdown_table" else 0,
-                    "format": test_card_format,
-                    "source_collection": selected_collection,
-                    "source_docs": selected_doc_ids,
-                    "doc_title": doc_title
-                }
-
-                st.success(f" Step 2/2: Generated {len(test_cards)} test card sections!")
-
-            except Exception as e:
-                st.error(f" Failed to generate test cards: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-                st.session_state.test_cards = {}
-
-    # Display test cards
-    if st.session_state.get("test_cards"):
-        st.markdown("---")
-        st.subheader("Test Cards")
-
-        metadata = st.session_state.get("test_card_metadata", {})
-
-        # Summary metrics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Sections", metadata.get("total_sections", 0))
-        with col2:
-            st.metric("Total Tests", metadata.get("total_tests", 0))
-        with col3:
-            st.metric("Format", metadata.get("format", "N/A").upper())
-
-        st.markdown("---")
-
-        # Display each section's test cards
-        for section_title, card_content in st.session_state.test_cards.items():
-            with st.expander(f"{section_title}", expanded=False):
-
-                # Display based on format
-                if metadata.get("format") == "json":
-                    try:
-                        test_cards = json.loads(card_content)
-
-                        if test_cards:
-                            # Create interactive display for each test card
-                            for idx, tc in enumerate(test_cards):
-                                st.markdown(f"**{tc.get('test_id', f'TC-{idx+1}')}: {tc.get('test_title', 'Untitled Test')}**")
-
-                                col1, col2 = st.columns([2, 1])
-
-                                with col1:
-                                    st.markdown("**Procedures:**")
-                                    for i, proc in enumerate(tc.get('procedures', []), 1):
-                                        st.markdown(f"{i}. {proc}")
-
-                                with col2:
-                                    st.markdown("**Expected Results:**")
-                                    st.write(tc.get('expected_results', 'N/A'))
-
-                                    st.markdown("**Acceptance Criteria:**")
-                                    st.write(tc.get('acceptance_criteria', 'N/A'))
-
-                                # Dependencies
-                                if tc.get('dependencies'):
-                                    st.markdown(f"**Dependencies:** {', '.join(tc['dependencies'])}")
-
-                                # Execution tracking
-                                st.markdown("**Test Execution:**")
-                                exec_col1, exec_col2, exec_col3, exec_col4 = st.columns(4)
-
-                                with exec_col1:
-                                    st.checkbox("Executed", key=f"exec_{section_title}_{idx}")
-                                with exec_col2:
-                                    st.checkbox("Pass", key=f"pass_{section_title}_{idx}")
-                                with exec_col3:
-                                    st.checkbox("Fail", key=f"fail_{section_title}_{idx}")
-                                with exec_col4:
-                                    st.text_input("Notes", key=f"notes_{section_title}_{idx}", label_visibility="collapsed", placeholder="Notes...")
-
-                                st.markdown("---")
-
-                            # Section export options
-                            st.markdown("### Export Options")
-                            export_col1, export_col2 = st.columns(2)
-
-                            with export_col1:
-                                # Convert to DataFrame for CSV export
-                                df = pd.DataFrame(test_cards)
-                                csv_data = df.to_csv(index=False).encode('utf-8')
-                                st.download_button(
-                                    label="Download as CSV",
-                                    data=csv_data,
-                                    file_name=f"{section_title.replace(' ', '_')}_test_cards.csv",
-                                    mime="text/csv",
-                                    key=f"csv_{section_title}"
-                                )
-
-                            with export_col2:
-                                # Download as JSON
-                                json_data = json.dumps(test_cards, indent=2).encode('utf-8')
-                                st.download_button(
-                                    label="Download as JSON",
-                                    data=json_data,
-                                    file_name=f"{section_title.replace(' ', '_')}_test_cards.json",
-                                    mime="application/json",
-                                    key=f"json_{section_title}"
-                                )
-
-                        else:
-                            st.info("No test cards found for this section")
-
-                    except json.JSONDecodeError as e:
-                        st.error(f"Failed to parse JSON test cards: {e}")
-                        st.code(card_content, language="json")
-
-                else:  # markdown_table format
-                    if card_content and len(card_content.strip()) > 50:
-                        st.markdown(card_content)
-
-                        # Download markdown
-                        st.download_button(
-                            label="Download as Markdown",
-                            data=card_content.encode('utf-8'),
-                            file_name=f"{section_title.replace(' ', '_')}_test_cards.md",
-                            mime="text/markdown",
-                            key=f"md_{section_title}"
-                        )
-                    else:
-                        st.info("No test cards found for this section")
-
-        # Global export options
-        st.markdown("---")
-        st.subheader("Export All Test Cards")
-
-        export_format = st.radio(
-            "Export Format:",
-            ["Word (DOCX)", "Excel (CSV)"],
-            horizontal=True,
-            key="global_export_format"
-        )
-
-        if st.button("Export All", type="primary", key="export_all_button"):
-            with st.spinner(f"Generating {export_format} export..."):
-                try:
-                    if export_format == "Word (DOCX)":
-                        # Generate DOCX with test card tables
-                        bio = create_test_card_docx(
-                            st.session_state.test_cards,
-                            metadata,
-                            metadata.get('doc_title', doc_title)
-                        )
-
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        st.download_button(
-                            label="Download Word Document",
-                            data=bio,
-                            file_name=f"test_cards_{timestamp}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key="download_docx_all"
-                        )
-                        st.success(f" Word document ready: test_cards_{timestamp}.docx")
-
-                    else:  # Excel (CSV)
-                        # Combine all test cards into single CSV
-                        all_cards = []
-                        for section_title, card_content in st.session_state.test_cards.items():
-                            try:
-                                if metadata.get("format") == "json":
-                                    cards = json.loads(card_content)
-                                    for card in cards:
-                                        card['section'] = section_title
-                                    all_cards.extend(cards)
-                            except:
-                                pass
-
-                        if all_cards:
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            df_all = pd.DataFrame(all_cards)
-                            csv_data = df_all.to_csv(index=False).encode('utf-8')
-
-                            st.download_button(
-                                label="Download CSV",
-                                data=csv_data,
-                                file_name=f"test_cards_{timestamp}.csv",
-                                mime="text/csv",
-                                key="download_csv_all"
-                            )
-                            st.success(f" CSV export ready: {len(all_cards)} test cards")
-                        else:
-                            st.warning("No test cards available to export")
-
-                except Exception as e:
-                    st.error(f" Export failed: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-
-    else:
-        st.info(" Click 'Generate Test Plan & Cards' to generate test cards from the selected documents")
-
-    # Help section
-    with st.expander("Help & Information"):
-        st.markdown("""
-        ### How to Use Test Card Generator
-
-        1. **Select Source Documents**:
-           - Choose a collection from your vector database
-           - Load and select specification documents (MIL-STD, ISO, etc.)
-
-        2. **Generate Test Plan & Cards**:
-           - Choose output format (Markdown table or JSON)
-           - Provide a test plan title
-           - Click to generate - this creates a test plan and extracts test cards
-
-        3. **Review Test Cards**:
-           - Expand sections to view individual test cards with:
-             - Test ID and Title
-             - Step-by-step procedures
-             - Expected results and acceptance criteria
-             - Dependencies (if any)
-
-        4. **Track Execution**:
-           - Use checkboxes to mark tests as executed, passed, or failed
-           - Add notes for each test
-
-        5. **Export**:
-           - Download individual sections (CSV, JSON, Markdown)
-           - Export all test cards together (Word DOCX, Excel CSV)
-
-        ### Export Formats
-
-        - **Word (DOCX)**: Professional Word document with formatted tables, headers, and TOC
-        - **Excel (CSV)**: Spreadsheet format for test tracking in Excel
-        - **JSON**: Machine-readable format for integration with test management tools
-        - **Markdown**: For manual conversion or further processing
-
-        ### Tips
-
-        - **JSON format** provides the most interactive display with execution tracking
-        - **Word (DOCX)** format creates professional test documentation with proper formatting
-        - Use **CSV** format for test execution tracking in spreadsheet applications
-        - Test cards are generated directly from your uploaded specification documents
-        """)
-
-
-def render_generated_plans_viewer():
-    """View and download previously generated test plans"""
-    st.subheader("Generated Test Plans")
-    st.info("Browse and download test plans generated via Document Generator")
 
     try:
-        # Fetch documents from generated_test_plan collection
+        # Fetch available test plans
         response = api_client.get(
             f"{config.fastapi_url}/api/vectordb/documents?collection_name=generated_test_plan",
-            timeout=10
+            timeout=30
         )
 
         doc_ids = response.get("ids", [])
         metadatas = response.get("metadatas", [])
-        documents = response.get("documents", [])
 
         if not doc_ids:
-            st.info("No generated test plans found. Generate test plans using the Document Generator.")
+            st.info("No test plans found. Generate a test plan first using the Document Generator.")
             return
 
-        st.success(f"Found {len(doc_ids)} generated test plan(s)")
+        # Create simple dropdown options - just show document name for consistency
+        plan_options = {
+            m.get('title', 'Untitled'): doc_id
+            for doc_id, m in zip(doc_ids, metadatas)
+        }
 
-        # Create dataframe for display
-        plans_data = []
-        for doc_id, metadata in zip(doc_ids, metadatas):
-            plans_data.append({
-                "Document ID": doc_id,
-                "Title": metadata.get("title", "N/A"),
-                "Generated": metadata.get("generated_at", "N/A"),
-                "Sections": metadata.get("total_sections", 0),
-                "Requirements": metadata.get("total_requirements", 0),
-                "Test Procedures": metadata.get("total_test_procedures", 0),
-                "Words": metadata.get("word_count", 0),
-                "Status": metadata.get("processing_status", "N/A")
-            })
+        # Step 1: Select Test Plan
+        st.markdown("### Select Test Plan")
+        selected_plan = st.selectbox(
+            "Choose a test plan:",
+            list(plan_options.keys()),
+            key="selected_test_plan",
+            label_visibility="collapsed"
+        )
 
-        df = pd.DataFrame(plans_data)
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        if not selected_plan:
+            return
+
+        selected_doc_id = plan_options[selected_plan]
+        selected_metadata = next(m for doc_id, m in zip(doc_ids, metadatas) if doc_id == selected_doc_id)
+
+        # Show plan details
+        with st.expander("Test Plan Details"):
+            st.text(f"Document ID: {selected_doc_id}")
+            st.text(f"Generated: {selected_metadata.get('generated_at', 'N/A')}")
+            st.text(f"Sections: {selected_metadata.get('total_sections', 0)}")
+            st.text(f"Requirements: {selected_metadata.get('total_requirements', 0)}")
 
         st.markdown("---")
-        st.subheader("View Test Plan")
 
-        # Select a plan to view
+        # Resume Existing Test Card Generation
+        with st.expander("Resume Existing Test Card Generation", expanded=False):
+            st.write("If you refreshed the page or came back later, you can resume your test card generation here.")
+
+            try:
+                jobs_response = api_client.get(
+                    f"{config.endpoints.doc_gen}/list-test-card-jobs",
+                    timeout=10
+                )
+                jobs = jobs_response.get("jobs", [])
+
+                if jobs:
+                    st.write(f"**Select from {len(jobs)} recent job(s):**")
+
+                    # Create a table of jobs
+                    for job in jobs[:10]:  # Show last 10
+                        status = job.get("status", "unknown")
+                        job_id = job.get("job_id", "")
+                        test_plan_title = job.get("test_plan_title", "Untitled")
+                        created_at = job.get("created_at", "")
+                        test_cards_generated = job.get("test_cards_generated", "0")
+
+                        # Calculate elapsed time
+                        try:
+                            from datetime import datetime
+                            created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            elapsed = datetime.now() - created.replace(tzinfo=None)
+                            minutes = int(elapsed.total_seconds() / 60)
+                            if minutes < 60:
+                                time_str = f"{minutes}m ago"
+                            else:
+                                hours = minutes // 60
+                                time_str = f"{hours}h {minutes % 60}m ago"
+                        except:
+                            time_str = created_at[:19] if created_at else "Unknown"
+
+                        # Status emoji
+                        status_emoji = {
+                            "completed": "✅",
+                            "processing": "⏳",
+                            "queued": "📝",
+                            "failed": "❌",
+                            "initializing": "⏳"
+                        }.get(status.lower(), "❓")
+
+                        col1, col2, col3 = st.columns([4, 3, 2])
+                        with col1:
+                            st.write(f"{status_emoji} **{test_plan_title}**")
+                            st.caption(f"{job_id[:25]}...")
+                        with col2:
+                            st.write(f"**{status.upper()}**")
+                            st.caption(f"{time_str} | {test_cards_generated} cards")
+                        with col3:
+                            button_label = "View" if status.lower() == "completed" else "Resume"
+                            button_type = "primary" if status.lower() in ["processing", "queued", "initializing"] else "secondary"
+                            if st.button(button_label, key=f"resume_testcard_{job_id}", type=button_type, use_container_width=True):
+                                st.session_state.testcard_job_id = job_id
+                                st.session_state.testcard_job_status = status
+                                st.rerun()
+
+                        st.markdown("---")
+
+                else:
+                    st.info("No test card generation jobs found. Start a new generation below.")
+
+            except Exception as e:
+                st.warning(f"Could not load test card jobs: {e}")
+                st.info("Start a new generation below.")
+
+        st.markdown("---")
+
+        # Step 2: Generate Test Cards
+        st.markdown("### Generate Test Cards")
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            if st.button("Generate Test Cards", type="primary", use_container_width=True):
+                with st.spinner("Submitting generation request..."):
+                    try:
+                        response = api_client.post(
+                            f"{config.endpoints.doc_gen}/generate-test-cards-from-plan-async",
+                            data={
+                                "test_plan_id": selected_doc_id,
+                                "collection_name": "generated_test_plan",
+                                "format": "markdown_table"
+                            },
+                            timeout=30
+                        )
+
+                        job_id = response.get("job_id")
+                        st.session_state.testcard_job_id = job_id
+                        st.session_state.testcard_job_status = "queued"
+                        st.session_state.selected_test_plan_id = selected_doc_id
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Failed to start test card generation: {str(e)}")
+
+        # Check for active job
+        if st.session_state.get("testcard_job_id"):
+            job_id = st.session_state.testcard_job_id
+
+            # Define completion handler for test card generation
+            def on_test_card_completed(result_response):
+                test_cards_count = result_response.get("test_cards_generated", 0)
+                st.success(f"Generated {test_cards_count} test cards successfully")
+
+                st.markdown("---")
+
+                # Step 3: Export to DOCX
+                st.markdown("### Export Test Cards")
+
+                if st.button("Export to DOCX", type="secondary", use_container_width=True, key="export_completed_cards"):
+                    try:
+                        # Call export endpoint
+                        import requests
+                        export_response = requests.post(
+                            f"{config.fastapi_url}/api/doc_gen/test-cards/export-docx",
+                            json={
+                                "test_plan_id": st.session_state.get("selected_test_plan_id", selected_doc_id),
+                                "collection_name": "test_cards"
+                            },
+                            timeout=60
+                        )
+
+                        if export_response.status_code == 200:
+                            # Provide download buttons - match test plan style
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            docx_filename = f"test_cards_{timestamp}.docx"
+
+                            download_col1, download_col2 = st.columns(2)
+
+                            with download_col1:
+                                # DOCX download
+                                st.download_button(
+                                    label="Download DOCX",
+                                    data=export_response.content,
+                                    file_name=docx_filename,
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="download_export_cards_docx"
+                                )
+
+                            with download_col2:
+                                # Markdown download
+                                try:
+                                    markdown_response = requests.post(
+                                        f"{config.fastapi_url}/api/doc_gen/test-cards/export-markdown",
+                                        json={
+                                            "test_plan_id": st.session_state.get("selected_test_plan_id", selected_doc_id),
+                                            "collection_name": "test_cards"
+                                        },
+                                        timeout=60
+                                    )
+
+                                    if markdown_response.status_code == 200:
+                                        md_filename = f"test_cards_{timestamp}.md"
+                                        st.download_button(
+                                            label="Download Markdown",
+                                            data=markdown_response.content,
+                                            file_name=md_filename,
+                                            mime="text/markdown",
+                                            type="secondary",
+                                            use_container_width=True,
+                                            key="download_export_cards_md"
+                                        )
+                                    else:
+                                        st.warning("Markdown export unavailable")
+                                except Exception as e:
+                                    st.warning(f"Markdown export failed: {e}")
+                        else:
+                            st.error(f"Export failed: {export_response.text}")
+
+                    except Exception as e:
+                        st.error(f"Export failed: {str(e)}")
+
+            # Define clear handler
+            def on_clear():
+                if "testcard_job_id" in st.session_state:
+                    del st.session_state.testcard_job_id
+                if "testcard_job_status" in st.session_state:
+                    del st.session_state.testcard_job_status
+
+            # Use the reusable JobStatusMonitor component
+            monitor = JobStatusMonitor(
+                job_id=job_id,
+                session_key="testcard",
+                status_endpoint=f"{config.endpoints.doc_gen}/test-card-generation-status/{{job_id}}",
+                result_endpoint=f"{config.endpoints.doc_gen}/test-card-generation-result/{{job_id}}",
+                job_name="Test Card Generation",
+                show_metrics=True,
+                show_elapsed_time=True,
+                allow_cancel=False,
+                on_completed=on_test_card_completed,
+                on_clear=on_clear,
+                auto_refresh_interval=5,  # Refresh every 5 seconds
+                auto_clear_on_complete=False  # Keep results visible
+            )
+            monitor.render()
+
+    except Exception as e:
+        st.error(f"Failed to load test plans: {str(e)}")
+
+
+def render_test_card_executor():
+    """Execute and track test cards"""
+    st.subheader("Execute Test Cards")
+
+    try:
+        # Fetch available test plans
+        response = api_client.get(
+            f"{config.fastapi_url}/api/vectordb/documents?collection_name=generated_test_plan",
+            timeout=30
+        )
+
+        doc_ids = response.get("ids", [])
+        metadatas = response.get("metadatas", [])
+
+        if not doc_ids:
+            st.info("No test plans found.")
+            return
+
+        # Select test plan
         plan_options = {
-            f"{m.get('title', 'Unknown')} - {m.get('generated_at', 'N/A')}": doc_id
+            f"{m.get('title', 'Untitled')} ({doc_id[:20]}...)": doc_id
             for doc_id, m in zip(doc_ids, metadatas)
         }
 
         selected_plan = st.selectbox(
-            "Select a test plan to view:",
+            "Select test plan to view test cards:",
             list(plan_options.keys()),
-            key="selected_plan"
+            key="executor_test_plan"
         )
 
-        if selected_plan:
-            selected_doc_id = plan_options[selected_plan]
-            selected_metadata = next(m for doc_id, m in zip(doc_ids, metadatas) if doc_id == selected_doc_id)
-            selected_content = next(doc for doc_id, doc in zip(doc_ids, documents) if doc_id == selected_doc_id)
+        if not selected_plan:
+            return
 
-            # Display metadata
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Sections", selected_metadata.get("total_sections", 0))
-            with col2:
-                st.metric("Requirements", selected_metadata.get("total_requirements", 0))
-            with col3:
-                st.metric("Test Procedures", selected_metadata.get("total_test_procedures", 0))
-            with col4:
-                st.metric("Word Count", selected_metadata.get("word_count", 0))
+        selected_doc_id = plan_options[selected_plan]
 
-            # Display content
-            st.markdown("---")
-            st.subheader("Test Plan Content")
+        # Query test cards for this test plan
+        cards_response = api_client.post(
+            f"{config.endpoints.doc_gen}/query-test-cards",
+            data={
+                "test_plan_id": selected_doc_id,
+                "collection_name": "test_cards"
+            },
+            timeout=30
+        )
 
-            # Show in expandable sections
-            with st.expander("View Full Test Plan", expanded=True):
-                st.markdown(selected_content)
+        test_cards = cards_response.get("test_cards", [])
+        total_count = cards_response.get("total_count", 0)
 
-            # Download button
-            st.markdown("---")
-            st.subheader("Download")
+        if not test_cards:
+            st.info("No test cards found for this test plan. Generate test cards first.")
+            return
 
-            # Create downloadable markdown file
-            download_data = f"# {selected_metadata.get('title', 'Test Plan')}\n\n"
-            download_data += f"**Generated:** {selected_metadata.get('generated_at', 'N/A')}\n\n"
-            download_data += f"**Sections:** {selected_metadata.get('total_sections', 0)} | "
-            download_data += f"**Requirements:** {selected_metadata.get('total_requirements', 0)} | "
-            download_data += f"**Test Procedures:** {selected_metadata.get('total_test_procedures', 0)}\n\n"
-            download_data += "---\n\n"
-            download_data += selected_content
+        st.success(f"Found {total_count} test cards")
 
-            st.download_button(
-                label="Download as Markdown",
-                data=download_data,
-                file_name=f"{selected_metadata.get('title', 'test_plan')}.md",
-                mime="text/markdown",
-                key="download_md"
+        # Display test cards in editable table format
+        cards_data = []
+        card_id_map = {}  # Map row index to card document_id for updates
+
+        for idx, card in enumerate(test_cards):
+            card_id_map[idx] = card.get("document_id", "")
+            cards_data.append({
+                "Test ID": card.get("test_id", "N/A"),
+                "Test Title": card.get("document_name", "N/A"),
+                "Requirement ID": card.get("requirement_id", "N/A"),
+                "Requirement": card.get("requirement_text", "N/A") or "N/A",
+                "Status": card.get("execution_status", "not_executed"),
+                "Pass": str(card.get("passed", "false")).lower() == "true",
+                "Fail": str(card.get("failed", "false")).lower() == "true",
+                "Notes": card.get("notes", "")
+            })
+
+        df = pd.DataFrame(cards_data)
+
+        # Configure editable columns
+        column_config = {
+            "Test ID": st.column_config.TextColumn("Test ID", disabled=True),
+            "Test Title": st.column_config.TextColumn("Test Title", disabled=False),
+            "Requirement ID": st.column_config.TextColumn("Requirement ID", disabled=True),
+            "Requirement": st.column_config.TextColumn("Requirement", disabled=False, width="large"),
+            "Status": st.column_config.SelectboxColumn(
+                "Status",
+                options=["not_executed", "in_progress", "completed", "failed"],
+                required=True
+            ),
+            "Pass": st.column_config.CheckboxColumn("Pass"),
+            "Fail": st.column_config.CheckboxColumn("Fail"),
+            "Notes": st.column_config.TextColumn("Notes", disabled=False)
+        }
+
+        # Display editable dataframe
+        edited_df = st.data_editor(
+            df,
+            column_config=column_config,
+            hide_index=True,
+            use_container_width=True,
+            key="test_cards_editor"
+        )
+
+        # Save changes button
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("Save Changes", type="primary", use_container_width=True):
+                # Detect changes and prepare updates
+                updates = []
+                for idx in range(len(df)):
+                    if idx < len(edited_df):
+                        # Check if any values changed
+                        original = df.iloc[idx]
+                        edited = edited_df.iloc[idx]
+
+                        if not original.equals(edited):
+                            document_id = card_id_map.get(idx)
+                            if document_id:
+                                updates.append({
+                                    "document_id": document_id,
+                                    "updates": {
+                                        "document_name": str(edited["Test Title"]),
+                                        "requirement_text": str(edited["Requirement"]),
+                                        "execution_status": str(edited["Status"]),
+                                        "passed": str(edited["Pass"]).lower(),
+                                        "failed": str(edited["Fail"]).lower(),
+                                        "notes": str(edited["Notes"])
+                                    }
+                                })
+
+                if updates:
+                    try:
+                        # Call API to update test cards
+                        import requests
+                        update_response = requests.post(
+                            f"{config.fastapi_url}/api/doc_gen/test-cards/bulk-update",
+                            json={
+                                "collection_name": "test_cards",
+                                "updates": updates
+                            },
+                            timeout=30
+                        )
+
+                        if update_response.status_code == 200:
+                            result = update_response.json()
+                            st.success(f"Successfully updated {result.get('updated_count', 0)} test cards")
+                            st.rerun()
+                        else:
+                            st.error(f"Update failed: {update_response.text}")
+
+                    except Exception as e:
+                        st.error(f"Failed to save changes: {str(e)}")
+                else:
+                    st.info("No changes detected")
+
+        with col2:
+            st.text("")  # Spacer
+
+        # Export option
+        st.markdown("---")
+        st.markdown("### Export Test Cards")
+
+        export_col1, export_col2 = st.columns(2)
+
+        with export_col1:
+            if st.button("📄 Export to DOCX", use_container_width=True, type="primary"):
+                try:
+                    import requests
+                    export_response = requests.post(
+                        f"{config.fastapi_url}/api/doc_gen/test-cards/export-docx",
+                        json={
+                            "test_plan_id": selected_doc_id,
+                            "collection_name": "test_cards"
+                        },
+                        timeout=60
+                    )
+
+                    if export_response.status_code == 200:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"test_cards_{timestamp}.docx"
+
+                        st.download_button(
+                            label="Download DOCX",
+                            data=export_response.content,
+                            file_name=filename,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                            key="download_docx_execute_tab"
+                        )
+                    else:
+                        st.error(f"Export failed: {export_response.text}")
+
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+
+        with export_col2:
+            if st.button("📝 Export to Markdown", use_container_width=True, type="secondary"):
+                try:
+                    import requests
+                    export_response = requests.post(
+                        f"{config.fastapi_url}/api/doc_gen/test-cards/export-markdown",
+                        json={
+                            "test_plan_id": selected_doc_id,
+                            "collection_name": "test_cards"
+                        },
+                        timeout=60
+                    )
+
+                    if export_response.status_code == 200:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"test_cards_{timestamp}.md"
+
+                        st.download_button(
+                            label="Download Markdown",
+                            data=export_response.content,
+                            file_name=filename,
+                            mime="text/markdown",
+                            use_container_width=True,
+                            key="download_md_execute_tab"
+                        )
+                    else:
+                        st.error(f"Export failed: {export_response.text}")
+
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+
+        # Edit individual test card
+        st.markdown("---")
+        st.markdown("### Edit Individual Test Card")
+
+        card_options = {
+            f"{card.get('test_id', 'N/A')} - {card.get('document_name', 'N/A')}": card
+            for card in test_cards
+        }
+
+        selected_card_key = st.selectbox(
+            "Select a test card to edit:",
+            list(card_options.keys()),
+            key="selected_card"
+        )
+
+        if selected_card_key:
+            selected_card = card_options[selected_card_key]
+
+            # Store original values to detect changes
+            original_values = {
+                "test_title": selected_card.get("document_name", ""),
+                "requirement_text": selected_card.get("requirement_text", ""),
+                "procedures": selected_card.get("content", selected_card.get("content_preview", "")),  # Use full content
+                "execution_status": selected_card.get("execution_status", "not_executed"),
+                "passed": str(selected_card.get("passed", "false")).lower() == "true",
+                "failed": str(selected_card.get("failed", "false")).lower() == "true",
+                "notes": selected_card.get("notes", "")
+            }
+
+            st.markdown(f"**Test ID:** {selected_card.get('test_id', 'N/A')}")
+            st.markdown(f"**Requirement ID:** {selected_card.get('requirement_id', 'N/A')}")
+
+            # Editable fields
+            edited_title = st.text_input(
+                "Test Title:",
+                value=original_values["test_title"],
+                key="edit_test_title"
             )
 
+            edited_requirement = st.text_area(
+                "Requirement:",
+                value=original_values["requirement_text"],
+                height=100,
+                key="edit_requirement"
+            )
+
+            # Parse markdown table to extract structured fields
+            def parse_test_card_table(markdown_table):
+                """Parse markdown table to extract test procedure fields"""
+                fields = {
+                    "procedures": "",
+                    "expected_results": "",
+                    "acceptance_criteria": "",
+                    "dependencies": ""
+                }
+
+                if not markdown_table or not markdown_table.strip():
+                    return fields
+
+                try:
+                    lines = markdown_table.strip().split('\n')
+                    if len(lines) >= 3:
+                        # Parse data row (skip header and separator)
+                        data_row = lines[2] if len(lines) > 2 else ""
+                        cells = [cell.strip() for cell in data_row.split('|')]
+
+                        # Table format: | Test ID | Test Title | Procedures | Expected Results | Acceptance Criteria | Dependencies | Executed | Pass | Fail | Notes |
+                        if len(cells) >= 7:
+                            fields["procedures"] = cells[3] if len(cells) > 3 else ""
+                            fields["expected_results"] = cells[4] if len(cells) > 4 else ""
+                            fields["acceptance_criteria"] = cells[5] if len(cells) > 5 else ""
+                            fields["dependencies"] = cells[6] if len(cells) > 6 else ""
+                except Exception as e:
+                    st.warning(f"Could not parse test card table: {e}")
+
+                return fields
+
+            # Parse current procedures
+            parsed_fields = parse_test_card_table(original_values["procedures"])
+
+            # Editable procedure fields
+            st.markdown("### Test Procedure Details")
+
+            edited_procedures_text = st.text_area(
+                "Procedures/Steps:",
+                value=parsed_fields["procedures"],
+                height=100,
+                key="edit_procedures_text",
+                help="Enter test procedures/steps (use <br> for line breaks)"
+            )
+
+            edited_expected_results = st.text_area(
+                "Expected Results:",
+                value=parsed_fields["expected_results"],
+                height=80,
+                key="edit_expected_results",
+                help="What should happen when the test is executed"
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                edited_acceptance_criteria = st.text_area(
+                    "Acceptance Criteria:",
+                    value=parsed_fields["acceptance_criteria"],
+                    height=80,
+                    key="edit_acceptance_criteria",
+                    help="Criteria to determine if test passes"
+                )
+
+            with col2:
+                edited_dependencies = st.text_area(
+                    "Dependencies:",
+                    value=parsed_fields["dependencies"],
+                    height=80,
+                    key="edit_dependencies",
+                    help="Prerequisites or dependencies for this test"
+                )
+
+            # Execution tracking
+            col1, col2 = st.columns(2)
+            with col1:
+                edited_status = st.selectbox(
+                    "Execution Status:",
+                    options=["not_executed", "in_progress", "completed", "failed"],
+                    index=["not_executed", "in_progress", "completed", "failed"].index(original_values["execution_status"]),
+                    key="edit_status"
+                )
+
+            with col2:
+                st.markdown("**Test Result:**")
+                result_col1, result_col2 = st.columns(2)
+                with result_col1:
+                    edited_passed = st.checkbox("Pass", value=original_values["passed"], key="edit_passed")
+                with result_col2:
+                    edited_failed = st.checkbox("Fail", value=original_values["failed"], key="edit_failed")
+
+            edited_notes = st.text_area(
+                "Notes:",
+                value=original_values["notes"],
+                height=100,
+                key="edit_notes"
+            )
+
+            # Save button
+            if st.button("Save Changes", type="primary", use_container_width=True, key="save_individual_card"):
+                # Check if procedure fields changed
+                procedures_changed = (
+                    edited_procedures_text != parsed_fields["procedures"] or
+                    edited_expected_results != parsed_fields["expected_results"] or
+                    edited_acceptance_criteria != parsed_fields["acceptance_criteria"] or
+                    edited_dependencies != parsed_fields["dependencies"]
+                )
+
+                # Check if anything changed
+                changes_detected = (
+                    edited_title != original_values["test_title"] or
+                    edited_requirement != original_values["requirement_text"] or
+                    procedures_changed or
+                    edited_status != original_values["execution_status"] or
+                    edited_passed != original_values["passed"] or
+                    edited_failed != original_values["failed"] or
+                    edited_notes != original_values["notes"]
+                )
+
+                if changes_detected:
+                    try:
+                        import requests
+
+                        # Build update payload
+                        update_payload = {
+                            "document_name": edited_title,
+                            "requirement_text": edited_requirement,
+                            "execution_status": edited_status,
+                            "passed": str(edited_passed).lower(),
+                            "failed": str(edited_failed).lower(),
+                            "notes": edited_notes
+                        }
+
+                        # Reconstruct markdown table if procedures were edited
+                        if procedures_changed:
+                            test_id = selected_card.get("test_id", "")
+
+                            # Reconstruct the markdown table with updated fields
+                            reconstructed_table = f"""| Test ID | Test Title | Procedures | Expected Results | Acceptance Criteria | Dependencies | Executed | Pass | Fail | Notes |
+|---------|------------|------------|------------------|---------------------|--------------|----------|------|------|-------|
+| {test_id} | {edited_title} | {edited_procedures_text} | {edited_expected_results} | {edited_acceptance_criteria} | {edited_dependencies} | () | () | () | |"""
+
+                            update_payload["content"] = reconstructed_table
+
+                        update_response = requests.post(
+                            f"{config.fastapi_url}/api/doc_gen/test-cards/bulk-update",
+                            json={
+                                "collection_name": "test_cards",
+                                "updates": [{
+                                    "document_id": selected_card.get("document_id"),
+                                    "updates": update_payload
+                                }]
+                            },
+                            timeout=30
+                        )
+
+                        if update_response.status_code == 200:
+                            st.success("Test card updated successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Update failed: {update_response.text}")
+
+                    except Exception as e:
+                        st.error(f"Failed to save changes: {str(e)}")
+                else:
+                    st.info("No changes detected")
+
     except Exception as e:
-        st.error(f"Failed to load generated test plans: {e}")
+        st.error(f"Failed to load test cards: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())

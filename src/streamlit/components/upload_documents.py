@@ -8,6 +8,7 @@ from config.constants import EMBEDDING_MODEL_NAME
 from config.settings import config
 from services.chromadb_service import chromadb_service
 from lib.utils import render_reconstructed_document
+from components.job_status_monitor import JobStatusMonitor
 
 
 @st.cache_resource(show_spinner=False)
@@ -294,7 +295,46 @@ def render_upload_component(
     - job_status_endpoint: URL template to poll job status, e.g. .../jobs/{job_id}
     """
     def pref(k): return f"{key_prefix}_{k}" if key_prefix else k
-    
+
+    # Check for active upload job
+    if pref("upload_job_id") in st.session_state:
+        job_id = st.session_state[pref("upload_job_id")]
+        endpoint = st.session_state.get(pref("upload_job_endpoint"), job_status_endpoint)
+
+        st.info(f"Upload Job: `{job_id}`")
+
+        # Completion handler
+        def on_upload_completed(result_response):
+            st.success("File ingestion complete!")
+            latest_doc_id = result_response.get("latest_document_id")
+            if latest_doc_id:
+                st.info(f"Latest document ID: {latest_doc_id}")
+            # Refresh collections
+            st.session_state['collections'] = load_collections_func()
+
+        # Clear handler
+        def on_clear():
+            if pref("upload_job_id") in st.session_state:
+                del st.session_state[pref("upload_job_id")]
+            if pref("upload_job_endpoint") in st.session_state:
+                del st.session_state[pref("upload_job_endpoint")]
+
+        # Use JobStatusMonitor with built-in per-file progress
+        monitor = JobStatusMonitor(
+            job_id=job_id,
+            session_key=pref("upload"),
+            status_endpoint=endpoint,
+            job_name="Document Upload",
+            show_metrics=True,  # Show metrics including chunks processed
+            show_elapsed_time=True,
+            on_completed=on_upload_completed,
+            on_clear=on_clear,
+            auto_refresh_interval=10,  # Refresh every 10  seconds for uploads
+            auto_clear_on_complete=True  # Auto-clear after successful upload
+        )
+        monitor.render()
+        return  # Stop rendering the upload form while job is active
+
     with st.container(border=True, key=pref("upload_container")):
         st.header("Upload & Ingesting")
         # # Refresh collections
@@ -439,124 +479,19 @@ def render_upload_component(
                                 st.error(f"Response: {resp.text}")
                                 return
                             resp.raise_for_status()
-                            job_id = resp.json().get("job_id")
-                        # Overall progress
-                        overall_progress = st.progress(0)
-                        overall_status_text = st.empty()
-                        
-                        # Document-specific progress containers
-                        doc_containers = {}
-                        doc_progress_bars = {}
-                        doc_status_texts = {}
-                        
-                        while True:
-                            time.sleep(1)
-                            job_status = requests.get(job_status_endpoint.format(job_id=job_id)).json()
-                            total = job_status.get("total_chunks", 0)
-                            done = job_status.get("processed_chunks", 0)
-                            total_docs = job_status.get("total_documents", 0)
-                            done_docs = job_status.get("processed_documents", 0)
-                            documents = job_status.get("documents", [])
-                            
-                            # Update overall progress - use document completion primarily
-                            if total_docs > 0:
-                                # Calculate progress based on document completion + chunk progress within current documents
-                                doc_completion_pct = (done_docs / total_docs) * 80  # 80% weight for completed docs
-                                
-                                # Add partial progress for documents currently being processed
-                                current_doc_progress = 0
-                                processing_docs = [d for d in documents if d["status"] == "processing"]
-                                if processing_docs and total_docs > done_docs:
-                                    # Average progress of currently processing documents
-                                    avg_current_progress = sum(
-                                        (d["chunks_processed"] / max(d["chunks_total"], 1)) * 100 
-                                        for d in processing_docs
-                                    ) / len(processing_docs)
-                                    current_doc_progress = (avg_current_progress / 100) * (20 / total_docs)  # 20% weight distributed
-                                
-                                overall_pct = min(int(doc_completion_pct + current_doc_progress), 100)
-                            else:
-                                overall_pct = int(done/total*100) if total else 0
-                            
-                            overall_progress.progress(overall_pct)
-                            
-                            # Enhanced status text
-                            if total_docs > 0:
-                                status_summary = []
-                                pending_count = len([d for d in documents if d["status"] == "pending"])
-                                processing_count = len([d for d in documents if d["status"] == "processing"])
-                                completed_count = len([d for d in documents if d["status"] == "completed"])
-                                failed_count = len([d for d in documents if d["status"] == "failed"])
-                                
-                                if pending_count > 0:
-                                    status_summary.append(f"{pending_count} pending")
-                                if processing_count > 0:
-                                    status_summary.append(f"{processing_count} processing")
-                                if completed_count > 0:
-                                    status_summary.append(f"{completed_count} completed")
-                                if failed_count > 0:
-                                    status_summary.append(f"{failed_count} failed")
-                                
-                                overall_status_text.text(f"Progress: {overall_pct}% | {' | '.join(status_summary)} | Chunks: {done}/{total}")
-                            else:
-                                overall_status_text.text(f"Overall: {done}/{total} chunks processed ({done_docs}/{total_docs} documents)")
-                            
-                            # Update individual document progress
-                            for doc in documents:
-                                doc_idx = doc["index"]
-                                filename = doc["filename"]
-                                doc_status = doc["status"]
-                                chunks_done = doc["chunks_processed"]
-                                chunks_total = doc["chunks_total"]
-                                
-                                if doc_idx not in doc_containers:
-                                    doc_containers[doc_idx] = st.container()
-                                    with doc_containers[doc_idx]:
-                                        st.write(f"**{filename}**")
-                                        doc_progress_bars[doc_idx] = st.progress(0)
-                                        doc_status_texts[doc_idx] = st.empty()
-                                
-                                # Update progress bar
-                                if chunks_total > 0:
-                                    doc_pct = int(chunks_done / chunks_total * 100)
-                                    doc_progress_bars[doc_idx].progress(min(doc_pct, 100))
-                                
-                                # Update status text with appropriate emoji
-                                status_text = {
-                                    "pending": "Pending",
-                                    "processing": "Processing",
-                                    "completed": "Completed!",
-                                    "failed": "FAILED"
-                                }.get(doc_status, "?")
-                                
-                                if doc_status == "failed":
-                                    error_msg = doc.get("error_message", "Unknown error")
-                                    doc_status_texts[doc_idx].text(f"{status_text}: {error_msg}")
-                                else:
-                                    doc_status_texts[doc_idx].text(f"{status_text}: {chunks_done}/{chunks_total} chunks")
-                            
-                            if job_status.get("status") in ("success","failed"): 
-                                # Final update: ensure all progress bars show completion
-                                overall_progress.progress(100)
-                                overall_status_text.text("Processing complete!")
-                                
-                                # Update all document progress bars to 100% on success
-                                if job_status.get("status") == "success":
-                                    for doc in documents:
-                                        doc_idx = doc["index"]
-                                        if doc_idx in doc_progress_bars:
-                                            doc_progress_bars[doc_idx].progress(100)
-                                            doc_status_texts[doc_idx].text("Completed: 100%")
-                                break
-                        
-                        if job_status.get("status") == "success":
-                            st.success("File ingestion complete!")
-                            latest = job_status.get("latest_document_id")
-                            if latest:
-                                st.session_state.latest_doc_id = latest
-                            st.session_state['collections'] = chromadb_service.get_collections()
-                        else:
-                            st.error("File ingestion failed.")
+                            job_data = resp.json()
+                            job_id = job_data.get("job_id")
+
+                        # Show success message for successful upload
+                        st.success(f"✓ Files uploaded successfully! Processing {len(uploaded)} file(s)...")
+                        if job_id:
+                            st.info(f"Job ID: {job_id}")
+
+                        # Store job_id in session state to trigger monitoring
+                        st.session_state[pref("upload_job_id")] = job_id
+                        st.session_state[pref("upload_job_endpoint")] = job_status_endpoint
+                        st.rerun()
+
                     except Exception as e:
                         st.error(f"Upload failed: {e}")
             if url:

@@ -48,30 +48,47 @@ Your role is to meticulously analyze technical specifications and extract testab
         Returns:
             User prompt string
         """
-        return f"""Analyze the following section of a military standard and extract EVERY possible testable rule, specification, constraint, or requirement.
+        return f"""Analyze the following section of a military/technical standard and extract EVERY testable requirement with its original numbering.
 
-REQUIREMENTS:
-1. Rules MUST be extremely detailed, explicit, and step-by-step
-2. Include measurable criteria, acceptable ranges, and referenced figures or tables if mentioned
-3. For ambiguous or implicit requirements, describe a specific test strategy
-4. Generate a short, content-based TITLE for this section (do not use page numbers)
+CRITICAL INSTRUCTIONS:
+1. PRESERVE ORIGINAL REQUIREMENT IDs: If the source uses "4.2.1", "REQ-01", or similar numbering, MAINTAIN that exact ID
+2. Extract the HIERARCHICAL STRUCTURE from the source document (e.g., section 4.2.1 contains requirements 4.2.1.1, 4.2.1.2)
+3. For EACH requirement, generate a TEST PROCEDURE (not just restate the requirement)
+4. Test procedures must be DETAILED, EXPLICIT, and EXECUTABLE by an engineer
+5. Generate a content-based TITLE for this section (not generic page numbers)
 
-CRITICAL: ABSOLUTELY DO NOT REPEAT, DUPLICATE, OR PARAPHRASE THE SAME RULE OR LINE. Each requirement, dependency, and test step must appear ONCE ONLY.
+ABSOLUTELY DO NOT REPEAT, DUPLICATE, OR PARAPHRASE THE SAME REQUIREMENT. Each requirement must appear ONCE ONLY.
 
-OUTPUT FORMAT:
-Organize your output using markdown headings and bolded text:
+OUTPUT FORMAT - CRITICAL:
+Organize output using this exact markdown structure:
 
 ## [Section Title]
+
 **Dependencies:**
-- List detailed dependencies as explicit tests, if any.
+- List prerequisites, tools, or configurations needed for testing
 
 **Conflicts:**
-- List detected or possible conflicts and provide recommendations or mitigation steps.
+- List any detected conflicts with other requirements or specifications
 
-**Test Rules:**
-1. (Very detailed, step-by-step numbered test rules)
-2. (Include measurable criteria and acceptance thresholds)
-3. (Reference specific figures, tables, or equations if applicable)
+**Test Procedures:**
+
+### Test Procedure [Original Req ID] (e.g., 4.2.1 or REQ-01)
+**Requirement:** [Exact requirement text from source]
+
+**Test Objective:** [What this test validates]
+
+**Test Setup:**
+- [Equipment/configuration needed]
+- [Prerequisites]
+
+**Test Steps:**
+- [Detailed step with specific actions]
+- [Include specific parameters, values, commands]
+- [Be explicit - engineer should know exactly what to do]
+
+**Expected Results:** [Specific measurable outcomes with values/ranges]
+
+**Pass/Fail Criteria:** [Explicit thresholds for pass/fail]
 
 ---
 
@@ -82,7 +99,11 @@ Section Text:
 
 ---
 
-If you find truly nothing testable, reply: 'No testable rules in this section.'
+IMPORTANT:
+- Look for requirement IDs in the format: "4.2.1", "4.2.1.1", "REQ-01", "REQ-02", numbered sections, etc.
+- Generate TEST PROCEDURES, not requirements tables
+- Each test procedure should enable an engineer to execute the test
+- If you find no testable requirements, reply: 'No testable rules in this section.'
 """
 
     def parse_response(self, response: str, context: AgentContext) -> Dict[str, Any]:

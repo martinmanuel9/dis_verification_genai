@@ -67,34 +67,54 @@ Your role is to critically analyze multiple requirement extractions and create a
             rules = result.get('rules_extracted', '')
             actor_outputs_text += f"\n\n### Actor {i}: Model {model_name} ({agent_id})\n{rules}\n{'='*40}"
 
-        return f"""You are a senior test planning reviewer (Critic AI).
+        return f"""You are a senior test planning reviewer (Critic AI) with expertise in military/technical standards compliance testing.
 
-Given the following section and rules extracted by several different AI models, do the following:
-
-1. Carefully review and compare the provided rule sets
-2. Synthesize a SINGLE, detailed and explicit set of testable rules
-3. Eliminate redundancies, correct errors, and ensure all requirements are present
-4. Ensure the final test plan is step-by-step, detailed, and well organized
+Given the following section and test procedures extracted by multiple AI models, synthesize a SINGLE, comprehensive test plan.
 
 CRITICAL INSTRUCTIONS:
-- NEVER simply combine all lines verbatim—synthesize, deduplicate, and streamline
-- If a rule, step, or line has the same or similar meaning as another, KEEP ONLY ONE
-- Preserve the most detailed and accurate version of each unique requirement
-- Identify and resolve any contradictions between actor outputs
+1. PRESERVE ORIGINAL REQUIREMENT IDs from the source document (4.2.1, REQ-01, etc.)
+2. Synthesize and deduplicate test procedures - if multiple actors extracted the same requirement, create ONE authoritative test procedure
+3. Maintain HIERARCHICAL STRUCTURE (e.g., 4.2.1 → 4.2.1.1 → 4.2.1.2)
+4. Generate TEST PROCEDURES (not requirements tables) - each must be executable by an engineer
+5. Ensure test procedures include: Objective, Setup, Steps, Expected Results, Pass/Fail Criteria
+6. Resolve contradictions between actor outputs by selecting the most detailed/accurate version
 
-OUTPUT FORMAT:
-Present your result in markdown format with these headings:
+DO NOT:
+- Create new requirement IDs (use originals from source)
+- Simply concatenate all actor outputs (synthesize and deduplicate)
+- Generate requirements tables (generate test procedures)
+- Include duplicate test procedures
+
+OUTPUT FORMAT - CRITICAL:
+Present your result in this exact markdown structure:
 
 ## [Section Title]
+
 **Dependencies:**
-- List detailed dependencies as explicit tests, if any
+- List prerequisites, tools, or configurations needed for testing
 
 **Conflicts:**
-- List detected or possible conflicts and provide recommendations
+- List detected conflicts and provide recommendations
 
-**Test Rules:**
-1. (Synthesized, deduplicated test rules)
-2. (Ensure each rule appears only once)
+**Test Procedures:**
+
+### Test Procedure [Original Req ID] (e.g., 4.2.1 or REQ-01)
+**Requirement:** [Exact requirement text from source]
+
+**Test Objective:** [What this test validates]
+
+**Test Setup:**
+- [Equipment/configuration needed]
+- [Prerequisites]
+
+**Test Steps:**
+- [Detailed step with specific actions]
+- [Include specific parameters, values, commands]
+- [Be explicit - engineer should know exactly what to do]
+
+**Expected Results:** [Specific measurable outcomes with values/ranges]
+
+**Pass/Fail Criteria:** [Explicit thresholds for pass/fail]
 
 ---
 
@@ -110,7 +130,7 @@ Actor Outputs from {len(actor_results)} AI models:
 
 ---
 
-Synthesize these outputs into a single, authoritative test plan."""
+TASK: Synthesize these {len(actor_results)} actor outputs into ONE authoritative test plan. Preserve requirement IDs, eliminate duplicates, and ensure each test procedure is complete and executable."""
 
     def parse_response(self, response: str, context: AgentContext) -> Dict[str, Any]:
         """

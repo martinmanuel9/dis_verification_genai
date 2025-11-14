@@ -92,8 +92,8 @@ class ExportTestPlanWithCardsRequest(BaseModel):
     """Request model for exporting test plan with embedded test cards"""
     pipeline_id: str = Field(..., description="Redis pipeline ID")
     include_test_cards: bool = Field(
-        default=True,
-        description="Whether to include test card tables"
+        default=False,
+        description="Whether to include test card tables (deprecated - use test_card_viewer.py instead)"
     )
     export_format: str = Field(
         default="pandoc",
@@ -116,7 +116,7 @@ class ExportTestPlanWithCardsRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "pipeline_id": "pipeline_abc123def456",
-                "include_test_cards": True,
+                "include_test_cards": False,
                 "export_format": "pandoc",
                 "include_toc": True,
                 "number_sections": True

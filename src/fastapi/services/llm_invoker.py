@@ -69,14 +69,15 @@ class LLMInvoker:
 
         while attempts <= retry_count:
             try:
-                # Get LLM instance
-                llm = get_llm(model_name)
+                # Get LLM instance with temperature and max_tokens if provided
+                # get_llm will handle model-specific parameter support
+                llm = get_llm(
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
 
-                # Apply overrides if provided
-                if temperature is not None:
-                    llm.temperature = temperature
-                if max_tokens is not None:
-                    llm.max_tokens = max_tokens
+                # Apply timeout if provided
                 if timeout is not None:
                     llm.request_timeout = timeout
 

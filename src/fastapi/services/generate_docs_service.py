@@ -584,11 +584,15 @@ class DocumentService:
             )
             
             print(f"Multi-agent pipeline generated: {test_plan_result.total_requirements} requirements, {test_plan_result.total_test_procedures} procedures from {test_plan_result.total_sections} sections")
-            
+
             docx_b64 = None
             chromadb_result = {}
-            if getattr(test_plan_result, 'processing_status', 'COMPLETED') == 'COMPLETED':
-                # Export to Word document only when completed
+            processing_status = getattr(test_plan_result, 'processing_status', 'COMPLETED')
+
+            # Save to ChromaDB for all statuses except ABORTED
+            # This ensures we capture COMPLETED, FALLBACK, and FAILED test plans
+            if processing_status != 'ABORTED':
+                # Export to Word document
                 docx_b64 = self.multi_agent_test_plan_service.export_to_word(test_plan_result)
                 # Save to ChromaDB generated_test_plan collection
                 session_id = str(uuid.uuid4())
@@ -597,6 +601,13 @@ class DocumentService:
                     session_id,
                     pipeline_id=getattr(test_plan_result, 'pipeline_id', None)
                 )
+
+                if chromadb_result.get('saved'):
+                    print(f"✓ Test plan saved to ChromaDB: {chromadb_result.get('document_id')} in collection '{chromadb_result.get('collection_name')}' (status: {processing_status})")
+                else:
+                    print(f"✗ Failed to save test plan to ChromaDB: {chromadb_result.get('error', 'Unknown error')} (status: {processing_status})")
+            else:
+                print(f"Skipping ChromaDB save for ABORTED test plan")
             
             return [{
                 "title": test_plan_result.title,

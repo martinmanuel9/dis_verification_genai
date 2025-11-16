@@ -1,0 +1,92 @@
+#!/bin/bash
+###############################################################################
+# Post-installation script for DIS Verification GenAI (Debian/Ubuntu)
+###############################################################################
+
+set -e
+
+INSTALL_DIR="/opt/dis-verification-genai"
+DATA_DIR="/var/lib/dis-verification-genai"
+SERVICE_USER="disverif"
+
+# Create service user if it doesn't exist
+if ! id "$SERVICE_USER" &>/dev/null; then
+    useradd -r -s /bin/false -d "$DATA_DIR" -c "DIS Verification GenAI Service" "$SERVICE_USER"
+fi
+
+# Create data directory
+mkdir -p "$DATA_DIR"/{data,logs,stored_images}
+chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+chmod 750 "$DATA_DIR"
+
+# Set permissions on install directory
+chown -R root:root "$INSTALL_DIR"
+chmod 755 "$INSTALL_DIR"
+
+# Add service user to docker group if docker is installed
+if getent group docker > /dev/null 2>&1; then
+    usermod -aG docker "$SERVICE_USER"
+fi
+
+# Create systemd service file
+cat > /etc/systemd/system/dis-verification-genai.service <<'EOF'
+[Unit]
+Description=DIS Verification GenAI
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/dis-verification-genai
+User=root
+Group=root
+
+# Load environment
+EnvironmentFile=-/opt/dis-verification-genai/.env
+
+# Start services
+ExecStart=/usr/bin/docker compose up -d
+
+# Stop services
+ExecStop=/usr/bin/docker compose down
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd
+systemctl daemon-reload
+
+# Don't auto-start - let user configure .env first
+echo ""
+echo "════════════════════════════════════════════════════════════════"
+echo "  DIS Verification GenAI installed successfully!"
+echo "════════════════════════════════════════════════════════════════"
+echo ""
+echo "Next steps:"
+echo "  1. Configure your environment:"
+echo "     sudo nano /opt/dis-verification-genai/.env"
+echo ""
+echo "  2. Start the services:"
+echo "     sudo systemctl start dis-verification-genai"
+echo ""
+echo "  3. Enable auto-start on boot (optional):"
+echo "     sudo systemctl enable dis-verification-genai"
+echo ""
+echo "  4. Access the web interface:"
+echo "     http://localhost:8501"
+echo ""
+echo "  5. For local model support, install Ollama:"
+echo "     /opt/dis-verification-genai/scripts/install-ollama.sh"
+echo ""
+echo "Documentation: /opt/dis-verification-genai/README.md"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+exit 0

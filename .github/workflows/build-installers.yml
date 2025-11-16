@@ -15,6 +15,9 @@ on:
         required: true
         default: '1.0.0'
 
+permissions:
+  contents: write  # Required for creating releases and uploading assets
+
 env:
   PRODUCT_NAME: "Verification GenAI"
   PRODUCT_SHORT_NAME: "verification-genai"

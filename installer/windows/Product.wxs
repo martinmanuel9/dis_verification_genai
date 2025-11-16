@@ -2,9 +2,9 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <?define ProductName = "DIS Verification GenAI" ?>
   <?define ProductShortName = "dis-verification-genai" ?>
-  <?define ProductVersion = "!(bind.FileVersion.MainExecutable)" ?>
+  <?define ProductVersion = "VERSION_PLACEHOLDER" ?>
   <?define Manufacturer = "Your Organization" ?>
-  <?define UpgradeCode = "YOUR-GUID-HERE-GENERATE-NEW" ?>
+  <?define UpgradeCode = "34c3ed39-12a4-44d1-b571-74e406f9beb1" ?>
 
   <Product Id="*"
            Name="$(var.ProductName)"
@@ -25,54 +25,21 @@
 
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- Custom actions -->
-    <Binary Id="CheckPrerequisites" SourceFile="scripts\check_prerequisites.ps1" />
-    <Binary Id="PostInstall" SourceFile="scripts\post_install.ps1" />
-
     <!-- Properties -->
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
-    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
     <Property Id="ARPHELPLINK" Value="https://github.com/martinmanuel9/dis_verification_genai" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/martinmanuel9/dis_verification_genai" />
-
-    <!-- Icon -->
-    <Icon Id="AppIcon" SourceFile="assets\icon.ico" />
 
     <!-- Feature definition -->
     <Feature Id="ProductFeature" Title="DIS Verification GenAI" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
       <ComponentGroupRef Id="ScriptComponents" />
-      <ComponentGroupRef Id="DockerComposeComponents" />
+      <ComponentGroupRef Id="ShortcutComponents" />
     </Feature>
 
     <!-- UI -->
     <UIRef Id="WixUI_InstallDir" />
     <UIRef Id="WixUI_ErrorProgressText" />
-
-    <!-- Custom UI for prerequisites check -->
-    <UI>
-      <Publish Dialog="WelcomeDlg"
-               Control="Next"
-               Event="DoAction"
-               Value="CheckPrerequisitesAction">1</Publish>
-    </UI>
-
-    <!-- Custom actions -->
-    <CustomAction Id="CheckPrerequisitesAction"
-                  BinaryKey="CheckPrerequisites"
-                  Execute="immediate"
-                  Return="check" />
-
-    <CustomAction Id="PostInstallAction"
-                  BinaryKey="PostInstall"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="check" />
-
-    <InstallExecuteSequence>
-      <Custom Action="CheckPrerequisitesAction" Before="LaunchConditions">NOT Installed</Custom>
-      <Custom Action="PostInstallAction" After="InstallFiles">NOT Installed</Custom>
-    </InstallExecuteSequence>
 
   </Product>
 
@@ -105,11 +72,20 @@
         <File Id="ChangelogFile"
               Source="..\..\CHANGELOG.md" />
         <File Id="EnvTemplate"
-              Source="..\..\env.template" />
+              Source="..\..\\.env.template" />
         <File Id="ReadmeFile"
               Source="..\..\README.md" />
       </Component>
+    </ComponentGroup>
 
+    <ComponentGroup Id="ScriptComponents" Directory="ScriptsFolder">
+      <Component Id="ScriptFiles" Guid="*">
+        <File Id="PullModelsScript" Source="..\..\scripts\pull-ollama-models.sh" KeyPath="yes" />
+        <File Id="CheckPrereqScript" Source="..\..\scripts\check_prerequisites.sh" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="ShortcutComponents">
       <!-- Start Menu Shortcut -->
       <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder" Guid="*">
         <Shortcut Id="ApplicationStartMenuShortcut"
@@ -117,8 +93,7 @@
                   Description="Launch DIS Verification GenAI Web Interface"
                   Target="[System64Folder]cmd.exe"
                   Arguments='/k "cd /d [INSTALLFOLDER] &amp;&amp; docker compose up -d &amp;&amp; start http://localhost:8501"'
-                  WorkingDirectory="INSTALLFOLDER"
-                  Icon="AppIcon" />
+                  WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
         <RegistryValue Root="HKCU"
                        Key="Software\[Manufacturer]\[ProductName]"
@@ -135,8 +110,7 @@
                   Description="Launch DIS Verification GenAI Web Interface"
                   Target="[System64Folder]cmd.exe"
                   Arguments='/k "cd /d [INSTALLFOLDER] &amp;&amp; docker compose up -d &amp;&amp; start http://localhost:8501"'
-                  WorkingDirectory="INSTALLFOLDER"
-                  Icon="AppIcon" />
+                  WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="CleanUpDesktopShortCut" On="uninstall"/>
         <RegistryValue Root="HKCU"
                        Key="Software\[Manufacturer]\[ProductName]"
@@ -145,18 +119,6 @@
                        Value="1"
                        KeyPath="yes"/>
       </Component>
-    </ComponentGroup>
-
-    <ComponentGroup Id="ScriptComponents" Directory="ScriptsFolder">
-      <Component Id="ScriptFiles" Guid="*">
-        <File Source="..\..\scripts\pull-ollama-models.sh" />
-        <File Source="..\..\scripts\check_prerequisites.sh" />
-      </Component>
-    </ComponentGroup>
-
-    <ComponentGroup Id="DockerComposeComponents" Directory="SrcFolder">
-      <!-- Add all source directories -->
-      <!-- Note: Use heat.exe to generate this automatically -->
     </ComponentGroup>
   </Fragment>
 </Wix>

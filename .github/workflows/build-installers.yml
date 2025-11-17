@@ -445,13 +445,43 @@ jobs:
     needs: [prepare, build-windows, build-linux-deb, build-linux-rpm, build-macos]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v3
+      - name: Download release assets
+        run: |
+          TAG="v${{ needs.prepare.outputs.version }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          # Download all release assets
+          gh release download "$TAG" --pattern "*.msi" || true
+          gh release download "$TAG" --pattern "*.deb" || true
+          gh release download "$TAG" --pattern "*.rpm" || true
+          gh release download "$TAG" --pattern "*.dmg" || true
+
+          ls -la
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate checksums
         run: |
-          sha256sum dis-verification-genai-*.{msi,deb,rpm,dmg} > checksums-sha256.txt
+          VERSION="${{ needs.prepare.outputs.version }}"
+          sha256sum dis-verification-genai-$VERSION.msi dis-verification-genai_${VERSION}_amd64.deb dis-verification-genai-$VERSION.x86_64.rpm dis-verification-genai-$VERSION.dmg > checksums-sha256.txt 2>/dev/null || true
+
+          # Only include files that exist
+          rm -f checksums-sha256.txt
+          [ -f "dis-verification-genai-$VERSION.msi" ] && sha256sum dis-verification-genai-$VERSION.msi >> checksums-sha256.txt
+          [ -f "dis-verification-genai_${VERSION}_amd64.deb" ] && sha256sum dis-verification-genai_${VERSION}_amd64.deb >> checksums-sha256.txt
+          [ -f "dis-verification-genai-$VERSION.x86_64.rpm" ] && sha256sum dis-verification-genai-$VERSION.x86_64.rpm >> checksums-sha256.txt
+          [ -f "dis-verification-genai-$VERSION.dmg" ] && sha256sum dis-verification-genai-$VERSION.dmg >> checksums-sha256.txt
+
           cat checksums-sha256.txt
+
+      - name: Delete existing checksums asset if exists
+        continue-on-error: true
+        run: |
+          TAG="v${{ needs.prepare.outputs.version }}"
+          ASSET_NAME="checksums-sha256.txt"
+          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload checksums
         uses: actions/upload-release-asset@v1

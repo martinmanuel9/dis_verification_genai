@@ -163,12 +163,28 @@ jobs:
 
       - name: Delete existing Windows installer asset if exists
         continue-on-error: true
+        shell: pwsh
         run: |
-          TAG="v${{ needs.prepare.outputs.version }}"
-          ASSET_NAME="dis-verification-genai-${{ needs.prepare.outputs.version }}.msi"
-          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          $TAG = "v${{ needs.prepare.outputs.version }}"
+          $ASSET_NAME = "dis-verification-genai-${{ needs.prepare.outputs.version }}.msi"
+
+          # Get release info
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" -Headers @{
+            Authorization = "token ${{ secrets.GITHUB_TOKEN }}"
+            Accept = "application/vnd.github.v3+json"
+          }
+
+          # Find and delete the asset if it exists
+          $asset = $release.assets | Where-Object { $_.name -eq $ASSET_NAME }
+          if ($asset) {
+            Write-Host "Deleting existing asset: $ASSET_NAME"
+            Invoke-RestMethod -Method Delete -Uri $asset.url -Headers @{
+              Authorization = "token ${{ secrets.GITHUB_TOKEN }}"
+              Accept = "application/vnd.github.v3+json"
+            }
+          } else {
+            Write-Host "Asset not found, nothing to delete"
+          }
 
       - name: Upload Windows Installer
         uses: actions/upload-release-asset@v1

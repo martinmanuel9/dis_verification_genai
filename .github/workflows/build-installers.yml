@@ -135,18 +135,108 @@ jobs:
           choco install wixtoolset -y
           echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Create staging directory
+        shell: pwsh
+        run: |
+          $version = "${{ needs.prepare.outputs.version }}"
+          $stagingDir = "installer/windows/staging"
+
+          # Create staging directory
+          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+
+          # Copy application files
+          Copy-Item -Recurse src $stagingDir
+          Copy-Item -Recurse scripts $stagingDir
+          Copy-Item -Recurse installer/windows/scripts/* $stagingDir/scripts -Force
+          Copy-Item docker-compose.yml $stagingDir
+          Copy-Item .env.template $stagingDir
+          Copy-Item VERSION $stagingDir
+          Copy-Item CHANGELOG.md $stagingDir
+          Copy-Item README.md $stagingDir
+          Copy-Item INSTALL.md $stagingDir
+
+          Write-Host "Staging directory created with all files"
+          Get-ChildItem -Path $stagingDir -Recurse | Select-Object -First 20
+
+      - name: Harvest files with heat.exe
+        shell: pwsh
+        run: |
+          cd installer/windows
+
+          # Use heat to harvest the staging directory
+          & heat.exe dir staging `
+            -cg ApplicationFiles `
+            -gg `
+            -sfrag `
+            -srd `
+            -dr INSTALLFOLDER `
+            -var "var.StagingDir" `
+            -out FilesFragment.wxs
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "heat.exe failed"
+            exit 1
+          }
+
+          Write-Host "Files harvested successfully"
+
       - name: Update version in WiX
         shell: pwsh
         run: |
           $version = "${{ needs.prepare.outputs.version }}"
-          (Get-Content installer/windows/Product.wxs) -replace 'VERSION_PLACEHOLDER', $version | Set-Content installer/windows/Product.wxs
+          $stagingPath = (Resolve-Path "installer/windows/staging").Path
+
+          # Update Product.wxs
+          (Get-Content installer/windows/Product.wxs) -replace 'VERSION_PLACEHOLDER', $version | Set-Content installer/windows/Product_build.wxs
+
+          Write-Host "Version updated to: $version"
+          Write-Host "Staging path: $stagingPath"
 
       - name: Build WiX installer
         shell: pwsh
         run: |
           cd installer/windows
-          candle.exe Product.wxs -ext WixUIExtension -ext WixUtilExtension
-          light.exe Product.wixobj -ext WixUIExtension -ext WixUtilExtension -out ../../dis-verification-genai-${{ needs.prepare.outputs.version }}.msi
+          $stagingPath = (Resolve-Path "staging").Path
+          $version = "${{ needs.prepare.outputs.version }}"
+
+          Write-Host "Building MSI with staging path: $stagingPath"
+
+          # Compile Product.wxs
+          & candle.exe Product_build.wxs `
+            -dStagingDir="$stagingPath" `
+            -dVersion=$version `
+            -arch x64 `
+            -ext WixUIExtension
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "candle.exe failed for Product.wxs"
+            exit 1
+          }
+
+          # Compile FilesFragment.wxs
+          & candle.exe FilesFragment.wxs `
+            -dStagingDir="$stagingPath" `
+            -dVersion=$version `
+            -arch x64 `
+            -ext WixUIExtension
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "candle.exe failed for FilesFragment.wxs"
+            exit 1
+          }
+
+          # Link to create MSI
+          & light.exe Product_build.wixobj FilesFragment.wixobj `
+            -out ../../dis-verification-genai-$version.msi `
+            -ext WixUIExtension `
+            -cultures:en-US
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "light.exe failed"
+            exit 1
+          }
+
+          Write-Host "MSI built successfully"
 
       - name: Upload Windows Installer
         shell: pwsh
@@ -193,6 +283,7 @@ jobs:
           cp VERSION "$PKG_DIR/opt/dis-verification-genai/"
           cp CHANGELOG.md "$PKG_DIR/opt/dis-verification-genai/"
           cp README.md "$PKG_DIR/opt/dis-verification-genai/"
+          cp INSTALL.md "$PKG_DIR/opt/dis-verification-genai/"
 
           # Copy DEBIAN control files
           cp installer/linux/DEBIAN/* "$PKG_DIR/DEBIAN/"
@@ -232,6 +323,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y rpm
 
+      - name: Copy RPM post-install script
+        run: |
+          # Copy the RPM postinst script to scripts directory
+          cp installer/linux/rpm-postinst.sh scripts/
+
       - name: Create RPM spec file
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
@@ -248,10 +344,19 @@ jobs:
 
           %description
           DIS Verification GenAI provides comprehensive test plan generation and
-          verification capabilities using advanced AI models.
+          verification capabilities using advanced AI models. Features include:
+          - Multi-agent test plan generation with Actor-Critic system
+          - RAG-enhanced document analysis with citation tracking
+          - Test card creation with Word export
+          - Support for cloud LLMs (OpenAI) and local models (Ollama)
+          - US-based model compliance (Meta, Microsoft, Snowflake)
+          - Complete on-premises deployment option
 
           %prep
           %setup -q -n %{name}-%{version}
+
+          %build
+          # No build needed - Python/Docker application
 
           %install
           mkdir -p %{buildroot}/opt/dis-verification-genai
@@ -262,15 +367,33 @@ jobs:
           cp VERSION %{buildroot}/opt/dis-verification-genai/
           cp CHANGELOG.md %{buildroot}/opt/dis-verification-genai/
           cp README.md %{buildroot}/opt/dis-verification-genai/
+          cp INSTALL.md %{buildroot}/opt/dis-verification-genai/
 
           %files
+          %defattr(-,root,root,-)
           /opt/dis-verification-genai
 
           %post
-          echo "DIS Verification GenAI installed successfully"
+          # Run post-installation script
+          if [ -f /opt/dis-verification-genai/scripts/rpm-postinst.sh ]; then
+              bash /opt/dis-verification-genai/scripts/rpm-postinst.sh
+          fi
 
           %preun
-          # Pre-uninstall script
+          # Stop and disable service before uninstall
+          if systemctl is-active --quiet dis-verification-genai; then
+              systemctl stop dis-verification-genai
+          fi
+          if systemctl is-enabled --quiet dis-verification-genai; then
+              systemctl disable dis-verification-genai
+          fi
+
+          %postun
+          # Remove systemd service file on purge
+          if [ $1 -eq 0 ]; then
+              rm -f /etc/systemd/system/dis-verification-genai.service
+              systemctl daemon-reload
+          fi
 
           %changelog
           * $(date +'%a %b %d %Y') GitHub Actions <actions@github.com> - %{version}-1
@@ -288,7 +411,7 @@ jobs:
 
           # Create source tarball with proper directory structure
           mkdir -p dis-verification-genai-$VERSION
-          cp -r src scripts docker-compose.yml .env.template VERSION CHANGELOG.md README.md dis-verification-genai-$VERSION/
+          cp -r src scripts docker-compose.yml .env.template VERSION CHANGELOG.md README.md INSTALL.md dis-verification-genai-$VERSION/
           tar czf ~/rpmbuild/SOURCES/dis-verification-genai-$VERSION.tar.gz dis-verification-genai-$VERSION
           rm -rf dis-verification-genai-$VERSION
 
@@ -360,14 +483,44 @@ jobs:
           </plist>
           EOF
 
-          # Create launcher script
+          # Create launcher script with setup
           cat > "build/$APP_NAME.app/Contents/MacOS/launcher" <<'EOF'
           #!/bin/bash
-          cd "$(dirname "$0")/../Resources"
+          RESOURCES_DIR="$(dirname "$0")/../Resources"
+          cd "$RESOURCES_DIR"
+
+          # Run setup on first launch if .env doesn't exist
+          if [ ! -f "$RESOURCES_DIR/.env" ] || [ ! -s "$RESOURCES_DIR/.env" ]; then
+              osascript -e 'tell app "Terminal" to do script "cd '"$RESOURCES_DIR"' && ./scripts/setup-env.sh"'
+              exit 0
+          fi
+
+          # Check if Docker is running
+          if ! docker info &> /dev/null; then
+              osascript -e 'display dialog "Docker Desktop is not running. Please start Docker Desktop first." buttons {"OK"} default button "OK"'
+              open -a "Docker"
+              exit 1
+          fi
+
+          # Start services
           docker compose up -d
+
+          # Wait for services
+          sleep 5
+
+          # Open web interface
           open http://localhost:8501
           EOF
           chmod +x "build/$APP_NAME.app/Contents/MacOS/launcher"
+
+          # Create setup script launcher
+          cat > "build/$APP_NAME.app/Contents/MacOS/setup" <<'EOF'
+          #!/bin/bash
+          RESOURCES_DIR="$(dirname "$0")/../Resources"
+          cd "$RESOURCES_DIR"
+          osascript -e 'tell app "Terminal" to do script "cd '"$RESOURCES_DIR"' && ./scripts/setup-env.sh && exit"'
+          EOF
+          chmod +x "build/$APP_NAME.app/Contents/MacOS/setup"
 
           # Create DMG
           hdiutil create -volname "$APP_NAME" -srcfolder build -ov -format UDZO "$DMG_NAME"

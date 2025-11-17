@@ -161,6 +161,15 @@ jobs:
           candle.exe Product.wxs -ext WixUIExtension -ext WixUtilExtension
           light.exe Product.wixobj -ext WixUIExtension -ext WixUtilExtension -out ../../dis-verification-genai-${{ needs.prepare.outputs.version }}.msi
 
+      - name: Delete existing Windows installer asset if exists
+        continue-on-error: true
+        run: |
+          TAG="v${{ needs.prepare.outputs.version }}"
+          ASSET_NAME="dis-verification-genai-${{ needs.prepare.outputs.version }}.msi"
+          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload Windows Installer
         uses: actions/upload-release-asset@v1
         env:
@@ -215,6 +224,15 @@ jobs:
 
           # Build DEB package
           dpkg-deb --build "$PKG_DIR"
+
+      - name: Delete existing DEB asset if exists
+        continue-on-error: true
+        run: |
+          TAG="v${{ needs.prepare.outputs.version }}"
+          ASSET_NAME="dis-verification-genai_${{ needs.prepare.outputs.version }}_amd64.deb"
+          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Linux DEB Package
         uses: actions/upload-release-asset@v1
@@ -311,6 +329,15 @@ jobs:
           RPM_FILE=$(ls dis-verification-genai-$VERSION-*.x86_64.rpm | head -1)
           echo "RPM_FILE=$RPM_FILE" >> $GITHUB_ENV
 
+      - name: Delete existing RPM asset if exists
+        continue-on-error: true
+        run: |
+          TAG="v${{ needs.prepare.outputs.version }}"
+          ASSET_NAME="dis-verification-genai-${{ needs.prepare.outputs.version }}.x86_64.rpm"
+          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload Linux RPM Package
         uses: actions/upload-release-asset@v1
         env:
@@ -377,6 +404,15 @@ jobs:
 
           # Create DMG
           hdiutil create -volname "$APP_NAME" -srcfolder build -ov -format UDZO "$DMG_NAME"
+
+      - name: Delete existing DMG asset if exists
+        continue-on-error: true
+        run: |
+          TAG="v${{ needs.prepare.outputs.version }}"
+          ASSET_NAME="dis-verification-genai-${{ needs.prepare.outputs.version }}.dmg"
+          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload macOS DMG
         uses: actions/upload-release-asset@v1

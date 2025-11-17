@@ -7,7 +7,7 @@ param(
     [string]$InstallDir = "$env:ProgramFiles\DIS Verification GenAI"
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # Show errors but continue with the wizard
 
 # Colors
 function Write-Info {

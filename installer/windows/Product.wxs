@@ -31,26 +31,6 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/martinmanuel9/dis_verification_genai" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/martinmanuel9/dis_verification_genai" />
 
-    <!-- Property for post-install script -->
-    <Property Id="POWERSHELLEXE">
-      <RegistrySearch Id="POWERSHELLEXE"
-                      Type="raw"
-                      Root="HKLM"
-                      Key="SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell"
-                      Name="Path" />
-    </Property>
-
-    <!-- Custom action to run post-install script -->
-    <CustomAction Id="RunPostInstall"
-                  Property="POWERSHELLEXE"
-                  ExeCommand='-NoProfile -ExecutionPolicy Bypass -File "[INSTALLFOLDER]scripts\post-install.ps1" -InstallDir "[INSTALLFOLDER]"'
-                  Execute="deferred"
-                  Impersonate="yes"
-                  Return="check" />
-
-    <InstallExecuteSequence>
-      <Custom Action="RunPostInstall" After="InstallFinalize">NOT Installed</Custom>
-    </InstallExecuteSequence>
 
     <!-- Feature definition -->
     <Feature Id="ProductFeature" Title="DIS Verification GenAI" Level="1">
@@ -101,6 +81,13 @@
                   Description="Stop DIS Verification GenAI services"
                   Target="[System64Folder]cmd.exe"
                   Arguments='/k "cd /d &quot;[INSTALLFOLDER]&quot; &amp;&amp; docker compose down"'
+                  WorkingDirectory="INSTALLFOLDER" />
+
+        <Shortcut Id="FirstTimeSetupShortcut"
+                  Name="First-Time Setup"
+                  Description="Run the first-time setup wizard"
+                  Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+                  Arguments='-NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\post-install.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot;'
                   WorkingDirectory="INSTALLFOLDER" />
 
         <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>

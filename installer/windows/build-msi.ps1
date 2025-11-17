@@ -163,7 +163,8 @@ foreach ($wxsFile in $wixFiles) {
         -dVersion=$Version `
         -out $wixObj `
         -arch x64 `
-        -ext WixUIExtension
+        -ext WixUIExtension `
+        -ext WixUtilExtension
 
     if ($LASTEXITCODE -ne 0) {
         Write-ErrorMsg "candle.exe failed for $wxsFile"
@@ -180,6 +181,7 @@ $msiFile = "$OutputDir\dis-verification-genai-$Version.msi"
 & $lightExe $wixObjs `
     -out $msiFile `
     -ext WixUIExtension `
+    -ext WixUtilExtension `
     -cultures:en-US
 
 if ($LASTEXITCODE -ne 0) {

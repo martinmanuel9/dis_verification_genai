@@ -81,7 +81,8 @@
     <ComponentGroup Id="ScriptComponents" Directory="ScriptsFolder">
       <Component Id="ScriptFiles" Guid="*">
         <File Id="PullModelsScript" Source="..\..\scripts\pull-ollama-models.sh" KeyPath="yes" />
-        <File Id="CheckPrereqScript" Source="..\..\scripts\check_prerequisites.sh" />
+        <File Id="StartScript" Source="..\..\scripts\start.sh" />
+        <File Id="StopScript" Source="..\..\scripts\stop.sh" />
       </Component>
     </ComponentGroup>
 

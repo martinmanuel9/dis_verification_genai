@@ -463,16 +463,35 @@ jobs:
       - name: Generate checksums
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          sha256sum dis-verification-genai-$VERSION.msi dis-verification-genai_${VERSION}_amd64.deb dis-verification-genai-$VERSION.x86_64.rpm dis-verification-genai-$VERSION.dmg > checksums-sha256.txt 2>/dev/null || true
 
-          # Only include files that exist
+          # Wait a bit for uploads to complete
+          echo "Waiting for assets to be uploaded..."
+          sleep 10
+
+          # Download again to make sure we have the latest
+          TAG="v$VERSION"
+          gh release download "$TAG" --pattern "*.msi" --clobber || true
+          gh release download "$TAG" --pattern "*.deb" --clobber || true
+          gh release download "$TAG" --pattern "*.rpm" --clobber || true
+          gh release download "$TAG" --pattern "*.dmg" --clobber || true
+
+          ls -la
+
+          # Generate checksums only for files that exist
           rm -f checksums-sha256.txt
           [ -f "dis-verification-genai-$VERSION.msi" ] && sha256sum dis-verification-genai-$VERSION.msi >> checksums-sha256.txt
           [ -f "dis-verification-genai_${VERSION}_amd64.deb" ] && sha256sum dis-verification-genai_${VERSION}_amd64.deb >> checksums-sha256.txt
           [ -f "dis-verification-genai-$VERSION.x86_64.rpm" ] && sha256sum dis-verification-genai-$VERSION.x86_64.rpm >> checksums-sha256.txt
           [ -f "dis-verification-genai-$VERSION.dmg" ] && sha256sum dis-verification-genai-$VERSION.dmg >> checksums-sha256.txt
 
-          cat checksums-sha256.txt
+          if [ -f checksums-sha256.txt ]; then
+            cat checksums-sha256.txt
+          else
+            echo "No files found to checksum"
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Delete existing checksums asset if exists
         continue-on-error: true
@@ -484,6 +503,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload checksums
+        if: hashFiles('checksums-sha256.txt') != ''
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

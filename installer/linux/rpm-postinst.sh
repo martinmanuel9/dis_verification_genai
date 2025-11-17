@@ -1,6 +1,6 @@
 #!/bin/bash
 ###############################################################################
-# Post-installation script for DIS Verification GenAI (Debian/Ubuntu)
+# Post-installation script for DIS Verification GenAI (RHEL/CentOS/Fedora)
 ###############################################################################
 
 set -e

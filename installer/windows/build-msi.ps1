@@ -1,0 +1,179 @@
+###############################################################################
+# Windows MSI Builder Script
+# Builds the Windows installer package
+###############################################################################
+
+param(
+    [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..\.." | Select-Object -ExpandProperty Path),
+    [string]$OutputDir = "$ProjectRoot\dist",
+    [string]$Version = (Get-Content "$ProjectRoot\VERSION" -Raw).Trim()
+)
+
+$ErrorActionPreference = "Stop"
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "[INFO] $Message" -ForegroundColor Cyan
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host "[SUCCESS] $Message" -ForegroundColor Green
+}
+
+function Write-ErrorMsg {
+    param([string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+}
+
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════════"
+Write-Host "         DIS Verification GenAI - Windows MSI Builder"
+Write-Host "         Version: $Version"
+Write-Host "═══════════════════════════════════════════════════════════════"
+Write-Host ""
+
+# Check for WiX Toolset
+Write-Info "Checking for WiX Toolset..."
+$wixPath = "${env:WIX}bin"
+if (-not $env:WIX) {
+    Write-ErrorMsg "WiX Toolset not found"
+    Write-Host "Download and install from: https://wixtoolset.org/releases/"
+    exit 1
+}
+Write-Success "WiX Toolset found: $wixPath"
+
+$heatExe = Join-Path $wixPath "heat.exe"
+$candleExe = Join-Path $wixPath "candle.exe"
+$lightExe = Join-Path $wixPath "light.exe"
+
+# Create build directory
+$buildDir = "$ProjectRoot\build\windows"
+$stagingDir = "$buildDir\staging"
+if (Test-Path $buildDir) {
+    Remove-Item -Recurse -Force $buildDir
+}
+New-Item -ItemType Directory -Path $buildDir | Out-Null
+New-Item -ItemType Directory -Path $stagingDir | Out-Null
+Write-Info "Created build directory: $buildDir"
+
+# Copy application files to staging
+Write-Info "Copying application files to staging directory..."
+
+# Required files
+$requiredFiles = @(
+    "docker-compose.yml",
+    ".env.template",
+    "VERSION",
+    "CHANGELOG.md",
+    "README.md",
+    "INSTALL.md"
+)
+
+foreach ($file in $requiredFiles) {
+    $sourcePath = Join-Path $ProjectRoot $file
+    if (-not (Test-Path $sourcePath)) {
+        Write-ErrorMsg "Missing required file: $file"
+        exit 1
+    }
+    Copy-Item $sourcePath $stagingDir
+}
+
+# Copy directories
+Write-Info "Copying src directory..."
+Copy-Item -Recurse "$ProjectRoot\src" $stagingDir
+
+Write-Info "Copying scripts directory..."
+Copy-Item -Recurse "$ProjectRoot\scripts" $stagingDir
+Copy-Item -Recurse "$PSScriptRoot\scripts\*" "$stagingDir\scripts" -Force
+
+Write-Success "All files copied to staging"
+
+# Verify critical files
+Write-Info "Verifying critical files..."
+$criticalScripts = @(
+    "scripts\setup-env.ps1",
+    "scripts\post-install.ps1",
+    "scripts\check_prerequisites.ps1"
+)
+
+foreach ($script in $criticalScripts) {
+    $scriptPath = Join-Path $stagingDir $script
+    if (-not (Test-Path $scriptPath)) {
+        Write-ErrorMsg "Missing critical script: $script"
+        exit 1
+    }
+}
+Write-Success "All critical files verified"
+
+# Use heat.exe to harvest the staging directory
+Write-Info "Harvesting files with heat.exe..."
+$fragmentFile = "$buildDir\FilesFragment.wxs"
+
+& $heatExe dir "$stagingDir" `
+    -cg ApplicationFiles `
+    -gg `
+    -sfrag `
+    -srd `
+    -dr INSTALLFOLDER `
+    -var "var.StagingDir" `
+    -out $fragmentFile
+
+if ($LASTEXITCODE -ne 0) {
+    Write-ErrorMsg "heat.exe failed"
+    exit 1
+}
+Write-Success "Files harvested successfully"
+
+# Update Product.wxs with version
+$productWxs = "$PSScriptRoot\Product.wxs"
+$productWxsContent = Get-Content $productWxs -Raw
+$productWxsContent = $productWxsContent -replace 'VERSION_PLACEHOLDER', $Version
+$productWxsBuild = "$buildDir\Product.wxs"
+Set-Content -Path $productWxsBuild -Value $productWxsContent
+
+# Compile .wxs files to .wixobj
+Write-Info "Compiling WiX sources..."
+$wixFiles = @($productWxsBuild, $fragmentFile)
+$wixObjs = @()
+
+foreach ($wxsFile in $wixFiles) {
+    $wixObj = $wxsFile -replace '\.wxs$', '.wixobj'
+    $wixObjs += $wixObj
+
+    & $candleExe $wxsFile `
+        -dStagingDir="$stagingDir" `
+        -dVersion=$Version `
+        -out $wixObj `
+        -arch x64 `
+        -ext WixUIExtension
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "candle.exe failed for $wxsFile"
+        exit 1
+    }
+}
+Write-Success "WiX sources compiled"
+
+# Link .wixobj files to create .msi
+Write-Info "Linking MSI package..."
+New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+$msiFile = "$OutputDir\dis-verification-genai-$Version.msi"
+
+& $lightExe $wixObjs `
+    -out $msiFile `
+    -ext WixUIExtension `
+    -cultures:en-US
+
+if ($LASTEXITCODE -ne 0) {
+    Write-ErrorMsg "light.exe failed"
+    exit 1
+}
+
+Write-Host ""
+Write-Success "MSI package built successfully!"
+Write-Host ""
+Write-Info "Output: $msiFile"
+Write-Host ""
+Write-Info "Package size: $([math]::Round((Get-Item $msiFile).Length / 1MB, 2)) MB"
+Write-Host ""

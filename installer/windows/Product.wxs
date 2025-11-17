@@ -18,7 +18,8 @@
              InstallScope="perMachine"
              Description="$(var.ProductName) Installer"
              Comments="AI-powered verification and test plan generation system"
-             Manufacturer="$(var.Manufacturer)" />
+             Manufacturer="$(var.Manufacturer)"
+             Platform="x64" />
 
     <!-- Upgrade logic -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />

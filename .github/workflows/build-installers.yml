@@ -207,7 +207,8 @@ jobs:
             -dStagingDir="$stagingPath" `
             -dVersion=$version `
             -arch x64 `
-            -ext WixUIExtension
+            -ext WixUIExtension `
+            -ext WixUtilExtension
 
           if ($LASTEXITCODE -ne 0) {
             Write-Error "candle.exe failed for Product.wxs"
@@ -219,7 +220,8 @@ jobs:
             -dStagingDir="$stagingPath" `
             -dVersion=$version `
             -arch x64 `
-            -ext WixUIExtension
+            -ext WixUIExtension `
+            -ext WixUtilExtension
 
           if ($LASTEXITCODE -ne 0) {
             Write-Error "candle.exe failed for FilesFragment.wxs"
@@ -230,6 +232,7 @@ jobs:
           & light.exe Product_build.wixobj FilesFragment.wixobj `
             -out ../../dis-verification-genai-$version.msi `
             -ext WixUIExtension `
+            -ext WixUtilExtension `
             -cultures:en-US
 
           if ($LASTEXITCODE -ne 0) {

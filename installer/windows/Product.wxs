@@ -42,8 +42,14 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Run first-time setup wizard now (recommended)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- Set PowerShell command for setup wizard -->
-    <Property Id="WixShellExecTarget" Value='[System64Folder]WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "[INSTALLFOLDER]scripts\post-install.ps1" -InstallDir "[INSTALLFOLDER]"' />
+    <!-- Property for WixShellExec - will be set by custom action -->
+    <Property Id="WixShellExecTarget" Value="[#post_install.ps1]" />
+
+    <!-- Set the actual command with resolved paths -->
+    <CustomAction Id="SetLaunchCommand"
+                  Property="WixShellExecTarget"
+                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\post-install.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot;"
+                  Execute="immediate" />
 
     <!-- Custom action to launch setup wizard -->
     <CustomAction Id="LaunchSetupWizard"
@@ -54,6 +60,7 @@
                   Impersonate="yes" />
 
     <InstallExecuteSequence>
+      <Custom Action="SetLaunchCommand" Before="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
       <Custom Action="LaunchSetupWizard" After="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
     </InstallExecuteSequence>
 

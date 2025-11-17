@@ -7,7 +7,7 @@ param(
     [string]$InstallDir = "$env:ProgramFiles\DIS Verification GenAI"
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # Don't exit on errors, show them and continue
 
 function Write-Info {
     param([string]$Message)

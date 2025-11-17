@@ -43,12 +43,12 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
     <!-- Property for WixShellExec - will be set by custom action -->
-    <Property Id="WixShellExecTarget" Value="[#post_install.ps1]" />
+    <Property Id="WixShellExecTarget" Value="[#run_post_install.cmd]" />
 
     <!-- Set the actual command with resolved paths -->
     <CustomAction Id="SetLaunchCommand"
                   Property="WixShellExecTarget"
-                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\post-install.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot;"
+                  Value="&quot;[INSTALLFOLDER]scripts\run-post-install.cmd&quot; &quot;[INSTALLFOLDER]&quot;"
                   Execute="immediate" />
 
     <!-- Custom action to launch setup wizard -->

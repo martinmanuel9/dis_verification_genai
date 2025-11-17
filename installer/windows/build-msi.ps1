@@ -87,6 +87,23 @@ Write-Info "Copying scripts directory..."
 Copy-Item -Recurse "$ProjectRoot\scripts" $stagingDir
 Copy-Item -Recurse "$PSScriptRoot\scripts\*" "$stagingDir\scripts" -Force
 
+# Create LICENSE.rtf if it doesn't exist (required by WiX UI)
+$licenseFile = "$ProjectRoot\LICENSE.rtf"
+if (-not (Test-Path $licenseFile)) {
+    Write-Info "Creating LICENSE.rtf..."
+    @"
+{\rtf1\ansi\ansicpg1252\deff0\nouicompat{\fonttbl{\f0\fnil\fcharset0 Calibri;}}
+{\*\generator Riched20 10.0.19041}\viewkind4\uc1
+\pard\sa200\sl276\slmult1\f0\fs22\lang9 DIS Verification GenAI\par
+Copyright (c) 2024. All rights reserved.\par
+\par
+This software is provided for use under the terms specified in the project repository.\par
+See: https://github.com/martinmanuel9/dis_verification_genai\par
+}
+"@ | Out-File -FilePath $licenseFile -Encoding ASCII
+}
+Copy-Item $licenseFile $stagingDir
+
 Write-Success "All files copied to staging"
 
 # Verify critical files

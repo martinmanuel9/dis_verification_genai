@@ -217,6 +217,8 @@ MODEL_REGISTRY: Dict[str, ModelConfig] = {
     # ),
 
     # Snowflake (US - Montana) - Arctic Embed Series
+    # NOTE: Arctic Embed models are EMBEDDING-ONLY models and should NOT be used for text generation
+    # They are kept commented out to prevent accidental selection for chat/generation tasks
     # "snowflake-arctic-embed": ModelConfig(
     #     model_id="snowflake-arctic-embed",
     #     display_name="Snowflake Arctic Embed (Local)",
@@ -224,13 +226,13 @@ MODEL_REGISTRY: Dict[str, ModelConfig] = {
     #     provider="ollama",
     #     max_context_tokens=512,
     # ),
-    "snowflake-arctic-embed2": ModelConfig(
-        model_id="snowflake-arctic-embed2",
-        display_name="Snowflake Arctic Embed 2.0 (Local)",
-        description="Snowflake's frontier embedding model - Multilingual support with superior English performance",
-        provider="ollama",
-        max_context_tokens=8192,
-    ),
+    # "snowflake-arctic-embed2": ModelConfig(
+    #     model_id="snowflake-arctic-embed2",
+    #     display_name="Snowflake Arctic Embed 2.0 (Local)",
+    #     description="Snowflake's frontier embedding model - Multilingual support with superior English performance",
+    #     provider="ollama",
+    #     max_context_tokens=8192,
+    # ),
 }
 
 

@@ -136,19 +136,28 @@ Automated build process:
 ```powershell
 # Double-click dis-verification-genai-1.0.0.msi
 
-# Installer shows GUI wizard
-# After files are copied, runs post-install.ps1:
+# Installer GUI shows steps:
+# 1. Welcome
+# 2. License agreement
+# 3. Installation folder
+# 4. Installing files...
+# 5. Final dialog with checkbox:
+#    ☑ Run first-time setup wizard now (recommended)
+# Click "Finish"
 
-# Interactive prompts (PowerShell):
-# 1. Run environment setup? (Y/n) → PowerShell wizard for .env
-# 2. Install Ollama? (y/N) → Opens download page
-# 3. Pull models? (y/N) → Pulls llama3.1:8b
-# 4. Start now? (y/N) → Launches Docker Compose + opens browser
+# PowerShell window opens automatically (if checkbox was checked):
+# Interactive prompts:
+# 1. Check Docker running → Offers to start Docker Desktop
+# 2. Run environment setup? (Y/n) → PowerShell wizard for .env
+# 3. Install Ollama? (y/N) → Opens download page
+# 4. Pull models? (y/N) → Pulls llama3.1:8b
+# 5. Start now? (y/N) → Launches Docker Compose + opens browser
 
 # Creates shortcuts:
-# - Start Menu > DIS Verification GenAI
-# - Start Menu > Configure Environment
-# - Start Menu > Stop Services
+# - Start Menu > DIS Verification GenAI (launch app)
+# - Start Menu > First-Time Setup (re-run setup)
+# - Start Menu > Configure Environment (just .env config)
+# - Start Menu > Stop Services (stop containers)
 ```
 
 ### Building Windows Installer:

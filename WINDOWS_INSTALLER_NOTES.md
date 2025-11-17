@@ -26,7 +26,16 @@ The MSI installer includes and extracts:
 
 **Installation Location:** `C:\Program Files\DIS Verification GenAI\`
 
-### 2. Creates Start Menu Shortcuts ✅
+### 2. Offers to Run Setup Wizard ✅
+
+At the end of installation, the final dialog shows:
+- ✅ Checkbox: **"Run first-time setup wizard now (recommended)"** (checked by default)
+- When you click "Finish", if checked, PowerShell opens with the interactive setup wizard
+- This automatically configures your .env, offers Ollama installation, pulls models, etc.
+
+**This matches Linux behavior** - setup runs right after installation!
+
+### 3. Creates Start Menu Shortcuts ✅
 
 Four shortcuts are created in Start Menu > DIS Verification GenAI:
 
@@ -58,12 +67,25 @@ Four shortcuts are created in Start Menu > DIS Verification GenAI:
 
 ### After Installing the MSI:
 
+**OPTION 1: Automatic (Recommended)** ⭐
+
+1. **At the end of MSI installation, leave the checkbox checked:**
+   ```
+   ☑ Run first-time setup wizard now (recommended)
+   ```
+
+2. **Click "Finish"**
+   - PowerShell window opens automatically
+   - Interactive setup wizard runs
+
+**OPTION 2: Manual (if you unchecked the box)**
+
 1. **Click "First-Time Setup" from Start Menu**
    ```
    Start Menu > DIS Verification GenAI > First-Time Setup
    ```
 
-2. **Follow the Interactive Wizard:**
+### The Setup Wizard Will:
    - Checks if Docker Desktop is running (offers to start it)
    - Runs environment setup wizard:
      - Enter OpenAI API key (or skip)
@@ -94,15 +116,16 @@ sudo dpkg -i dis-verification-genai_1.0.0_amd64.deb
 ### Windows (MSI):
 ```powershell
 # Double-click dis-verification-genai-1.0.0.msi
-# Installation completes silently
+# Installer GUI runs through steps
 # Files are copied, shortcuts created
-# No prompts during installation
-
-# After installation:
-# Start Menu > DIS Verification GenAI > First-Time Setup
-# NOW the interactive wizard runs
-# User controls when setup happens
+# Final dialog shows checkbox:
+#   ☑ Run first-time setup wizard now (recommended)
+# Click "Finish"
+# PowerShell opens and runs interactive wizard
+# Same experience as Linux, just at the END instead of DURING
 ```
+
+**Both platforms now offer automatic setup!** ✅
 
 ---
 

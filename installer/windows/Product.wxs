@@ -62,8 +62,6 @@
     <UIRef Id="WixUI_InstallDir" />
     <UIRef Id="WixUI_ErrorProgressText" />
 
-    <WixVariable Id="WixUILicenseRtf" Value="$(var.StagingDir)\LICENSE.rtf" Overridable="yes" />
-
   </Product>
 
   <!-- Directory structure -->

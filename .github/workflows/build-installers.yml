@@ -445,16 +445,19 @@ jobs:
     needs: [prepare, build-windows, build-linux-deb, build-linux-rpm, build-macos]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download release assets
         run: |
           TAG="v${{ needs.prepare.outputs.version }}"
           VERSION="${{ needs.prepare.outputs.version }}"
 
           # Download all release assets
-          gh release download "$TAG" --pattern "*.msi" || true
-          gh release download "$TAG" --pattern "*.deb" || true
-          gh release download "$TAG" --pattern "*.rpm" || true
-          gh release download "$TAG" --pattern "*.dmg" || true
+          gh release download "$TAG" --pattern "*.msi" -R ${{ github.repository }} || true
+          gh release download "$TAG" --pattern "*.deb" -R ${{ github.repository }} || true
+          gh release download "$TAG" --pattern "*.rpm" -R ${{ github.repository }} || true
+          gh release download "$TAG" --pattern "*.dmg" -R ${{ github.repository }} || true
 
           ls -la
         env:
@@ -470,10 +473,10 @@ jobs:
 
           # Download again to make sure we have the latest
           TAG="v$VERSION"
-          gh release download "$TAG" --pattern "*.msi" --clobber || true
-          gh release download "$TAG" --pattern "*.deb" --clobber || true
-          gh release download "$TAG" --pattern "*.rpm" --clobber || true
-          gh release download "$TAG" --pattern "*.dmg" --clobber || true
+          gh release download "$TAG" --pattern "*.msi" -R ${{ github.repository }} --clobber || true
+          gh release download "$TAG" --pattern "*.deb" -R ${{ github.repository }} --clobber || true
+          gh release download "$TAG" --pattern "*.rpm" -R ${{ github.repository }} --clobber || true
+          gh release download "$TAG" --pattern "*.dmg" -R ${{ github.repository }} --clobber || true
 
           ls -la
 

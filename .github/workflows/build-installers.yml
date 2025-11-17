@@ -28,7 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      upload_url: ${{ steps.set_upload_url.outputs.upload_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -84,56 +83,44 @@ jobs:
       - name: Create GitHub Release
         id: create_release
         if: steps.check_release.outputs.exists == 'false'
-        uses: actions/create-release@v1
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v$VERSION"
+
+          gh release create "$TAG" \
+            --title "Release v$VERSION" \
+            --notes "# DIS Verification GenAI v$VERSION
+
+          ## Installation
+
+          ### Windows
+          Download and run \`dis-verification-genai-$VERSION.msi\`
+
+          ### Linux (Debian/Ubuntu)
+          \`\`\`bash
+          sudo dpkg -i dis-verification-genai_${VERSION}_amd64.deb
+          sudo apt-get install -f  # Install dependencies if needed
+          \`\`\`
+
+          ### Linux (RHEL/CentOS/Fedora)
+          \`\`\`bash
+          sudo rpm -i dis-verification-genai-$VERSION.x86_64.rpm
+          \`\`\`
+
+          ### macOS
+          Open \`dis-verification-genai-$VERSION.dmg\` and drag to Applications
+
+          ## Prerequisites
+          - Docker 24.0.0 or later
+          - Docker Compose 2.20.0 or later
+          - 8 GB RAM minimum
+          - 50 GB disk space
+          - 4 CPU cores recommended
+
+          ## What's New
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          release_name: Release v${{ steps.version.outputs.version }}
-          body: |
-            # DIS Verification GenAI v${{ steps.version.outputs.version }}
-
-            ## Installation
-
-            ### Windows
-            Download and run `dis-verification-genai-${{ steps.version.outputs.version }}.msi`
-
-            ### Linux (Debian/Ubuntu)
-            ```bash
-            sudo dpkg -i dis-verification-genai_${{ steps.version.outputs.version }}_amd64.deb
-            sudo apt-get install -f  # Install dependencies if needed
-            ```
-
-            ### Linux (RHEL/CentOS/Fedora)
-            ```bash
-            sudo rpm -i dis-verification-genai-${{ steps.version.outputs.version }}.x86_64.rpm
-            ```
-
-            ### macOS
-            Open `dis-verification-genai-${{ steps.version.outputs.version }}.dmg` and drag to Applications
-
-            ## Prerequisites
-            - Docker 24.0.0 or later
-            - Docker Compose 2.20.0 or later
-            - 8 GB RAM minimum
-            - 50 GB disk space
-            - 4 CPU cores recommended
-
-            ## What's New
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
-          draft: false
-          prerelease: false
-
-      - name: Set upload URL output
-        id: set_upload_url
-        run: |
-          if [ "${{ steps.check_release.outputs.exists }}" = "true" ]; then
-            echo "Using existing release upload URL"
-            echo "upload_url=${{ steps.check_release.outputs.upload_url }}" >> $GITHUB_OUTPUT
-          else
-            echo "Using newly created release upload URL"
-            echo "upload_url=${{ steps.create_release.outputs.upload_url }}" >> $GITHUB_OUTPUT
-          fi
 
   build-windows:
     name: Build Windows Installer
@@ -161,40 +148,20 @@ jobs:
           candle.exe Product.wxs -ext WixUIExtension -ext WixUtilExtension
           light.exe Product.wixobj -ext WixUIExtension -ext WixUtilExtension -out ../../dis-verification-genai-${{ needs.prepare.outputs.version }}.msi
 
-      - name: Delete existing Windows installer asset if exists
-        continue-on-error: true
+      - name: Upload Windows Installer
         shell: pwsh
         run: |
-          $TAG = "v${{ needs.prepare.outputs.version }}"
-          $ASSET_NAME = "dis-verification-genai-${{ needs.prepare.outputs.version }}.msi"
+          $VERSION = "${{ needs.prepare.outputs.version }}"
+          $TAG = "v$VERSION"
+          $ASSET_PATH = "dis-verification-genai-$VERSION.msi"
 
-          # Get release info
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" -Headers @{
-            Authorization = "token ${{ secrets.GITHUB_TOKEN }}"
-            Accept = "application/vnd.github.v3+json"
-          }
+          # Delete existing asset if it exists
+          gh release delete-asset $TAG $ASSET_PATH -y -R ${{ github.repository }} 2>$null
 
-          # Find and delete the asset if it exists
-          $asset = $release.assets | Where-Object { $_.name -eq $ASSET_NAME }
-          if ($asset) {
-            Write-Host "Deleting existing asset: $ASSET_NAME"
-            Invoke-RestMethod -Method Delete -Uri $asset.url -Headers @{
-              Authorization = "token ${{ secrets.GITHUB_TOKEN }}"
-              Accept = "application/vnd.github.v3+json"
-            }
-          } else {
-            Write-Host "Asset not found, nothing to delete"
-          }
-
-      - name: Upload Windows Installer
-        uses: actions/upload-release-asset@v1
+          # Upload new asset
+          gh release upload $TAG $ASSET_PATH -R ${{ github.repository }} --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ./dis-verification-genai-${{ needs.prepare.outputs.version }}.msi
-          asset_name: dis-verification-genai-${{ needs.prepare.outputs.version }}.msi
-          asset_content_type: application/x-msi
 
   build-linux-deb:
     name: Build Linux DEB Package
@@ -241,24 +208,16 @@ jobs:
           # Build DEB package
           dpkg-deb --build "$PKG_DIR"
 
-      - name: Delete existing DEB asset if exists
-        continue-on-error: true
-        run: |
-          TAG="v${{ needs.prepare.outputs.version }}"
-          ASSET_NAME="dis-verification-genai_${{ needs.prepare.outputs.version }}_amd64.deb"
-          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload Linux DEB Package
-        uses: actions/upload-release-asset@v1
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="v$VERSION"
+          ASSET_PATH="dis-verification-genai_${VERSION}_amd64.deb"
+
+          # Upload with clobber to replace if exists
+          gh release upload "$TAG" "$ASSET_PATH" -R ${{ github.repository }} --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ./dis-verification-genai_${{ needs.prepare.outputs.version }}_amd64.deb
-          asset_name: dis-verification-genai_${{ needs.prepare.outputs.version }}_amd64.deb
-          asset_content_type: application/vnd.debian.binary-package
 
   build-linux-rpm:
     name: Build Linux RPM Package
@@ -345,24 +304,16 @@ jobs:
           RPM_FILE=$(ls dis-verification-genai-$VERSION-*.x86_64.rpm | head -1)
           echo "RPM_FILE=$RPM_FILE" >> $GITHUB_ENV
 
-      - name: Delete existing RPM asset if exists
-        continue-on-error: true
-        run: |
-          TAG="v${{ needs.prepare.outputs.version }}"
-          ASSET_NAME="dis-verification-genai-${{ needs.prepare.outputs.version }}.x86_64.rpm"
-          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload Linux RPM Package
-        uses: actions/upload-release-asset@v1
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="v$VERSION"
+          RPM_FILE="${{ env.RPM_FILE }}"
+
+          # Upload with clobber to replace if exists, rename to standard name
+          gh release upload "$TAG" "$RPM_FILE#dis-verification-genai-$VERSION.x86_64.rpm" -R ${{ github.repository }} --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ${{ env.RPM_FILE }}
-          asset_name: dis-verification-genai-${{ needs.prepare.outputs.version }}.x86_64.rpm
-          asset_content_type: application/x-rpm
 
   build-macos:
     name: Build macOS DMG
@@ -421,24 +372,16 @@ jobs:
           # Create DMG
           hdiutil create -volname "$APP_NAME" -srcfolder build -ov -format UDZO "$DMG_NAME"
 
-      - name: Delete existing DMG asset if exists
-        continue-on-error: true
-        run: |
-          TAG="v${{ needs.prepare.outputs.version }}"
-          ASSET_NAME="dis-verification-genai-${{ needs.prepare.outputs.version }}.dmg"
-          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload macOS DMG
-        uses: actions/upload-release-asset@v1
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="v$VERSION"
+          ASSET_PATH="dis-verification-genai-$VERSION.dmg"
+
+          # Upload with clobber to replace if exists
+          gh release upload "$TAG" "$ASSET_PATH" -R ${{ github.repository }} --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ./dis-verification-genai-${{ needs.prepare.outputs.version }}.dmg
-          asset_name: dis-verification-genai-${{ needs.prepare.outputs.version }}.dmg
-          asset_content_type: application/x-apple-diskimage
 
   checksums:
     name: Generate Checksums
@@ -496,22 +439,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete existing checksums asset if exists
-        continue-on-error: true
-        run: |
-          TAG="v${{ needs.prepare.outputs.version }}"
-          ASSET_NAME="checksums-sha256.txt"
-          gh release delete-asset "$TAG" "$ASSET_NAME" -y || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload checksums
         if: hashFiles('checksums-sha256.txt') != ''
-        uses: actions/upload-release-asset@v1
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="v$VERSION"
+
+          # Upload with clobber to replace if exists
+          gh release upload "$TAG" checksums-sha256.txt -R ${{ github.repository }} --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ./checksums-sha256.txt
-          asset_name: checksums-sha256.txt
-          asset_content_type: text/plain

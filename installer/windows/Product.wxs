@@ -63,7 +63,7 @@
   <!-- Components -->
   <Fragment>
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
-      <Component Id="MainFiles" Guid="*">
+      <Component Id="MainFiles" Guid="A1B2C3D4-E5F6-4A5B-9C8D-7E6F5A4B3C2D">
         <File Id="DockerComposeFile"
               Source="..\..\docker-compose.yml"
               KeyPath="yes" />
@@ -79,7 +79,7 @@
     </ComponentGroup>
 
     <ComponentGroup Id="ScriptComponents" Directory="ScriptsFolder">
-      <Component Id="ScriptFiles" Guid="*">
+      <Component Id="ScriptFiles" Guid="B2C3D4E5-F6A7-4B5C-8D9E-6F7A8B9C0D1E">
         <File Id="PullModelsScript" Source="..\..\scripts\pull-ollama-models.sh" KeyPath="yes" />
         <File Id="StartScript" Source="..\..\scripts\start.sh" />
         <File Id="StopScript" Source="..\..\scripts\stop.sh" />

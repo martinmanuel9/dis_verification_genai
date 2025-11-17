@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      upload_url: ${{ steps.set_upload_url.outputs.upload_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -59,8 +59,31 @@ jobs:
           fi
           echo "Version format valid: $VERSION"
 
+      - name: Check if release exists
+        id: check_release
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          echo "Checking for release with tag: $TAG"
+
+          # Use GitHub API to check if release exists
+          HTTP_CODE=$(curl -s -o /tmp/release.json -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Release $TAG already exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            UPLOAD_URL=$(cat /tmp/release.json | jq -r .upload_url)
+            echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
+          else
+            echo "Release $TAG does not exist (HTTP $HTTP_CODE)"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create GitHub Release
         id: create_release
+        if: steps.check_release.outputs.exists == 'false'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,6 +123,17 @@ jobs:
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
           draft: false
           prerelease: false
+
+      - name: Set upload URL output
+        id: set_upload_url
+        run: |
+          if [ "${{ steps.check_release.outputs.exists }}" = "true" ]; then
+            echo "Using existing release upload URL"
+            echo "upload_url=${{ steps.check_release.outputs.upload_url }}" >> $GITHUB_OUTPUT
+          else
+            echo "Using newly created release upload URL"
+            echo "upload_url=${{ steps.create_release.outputs.upload_url }}" >> $GITHUB_OUTPUT
+          fi
 
   build-windows:
     name: Build Windows Installer

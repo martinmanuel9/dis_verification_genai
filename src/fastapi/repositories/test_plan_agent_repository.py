@@ -401,6 +401,7 @@ class TestPlanAgentRepository:
             clone_data = {
                 'name': new_name,
                 'agent_type': source_agent.agent_type,
+                'workflow_type': source_agent.workflow_type or 'general',  # Ensure workflow_type is never None
                 'model_name': source_agent.model_name,
                 'system_prompt': source_agent.system_prompt,
                 'user_prompt_template': source_agent.user_prompt_template,

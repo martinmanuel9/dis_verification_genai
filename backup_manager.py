@@ -365,7 +365,7 @@ Databases Backed Up:
 
         # Validate backup directory
         if not backup_dir.exists() or not backup_dir.is_dir():
-            print(f"❌ Backup directory not found: {backup_dir}")
+            print(f"Backup directory not found: {backup_dir}")
             return False
 
         # Show backup info
@@ -376,7 +376,7 @@ Databases Backed Up:
 
         # Confirmation prompt
         if not skip_confirmation:
-            print("\n⚠️  WARNING: This will OVERWRITE existing data!")
+            print("\nWARNING: This will OVERWRITE existing data!")
             response = input("\nContinue with restore? (yes/N): ")
             if response.lower() != "yes":
                 print("Restore cancelled.")

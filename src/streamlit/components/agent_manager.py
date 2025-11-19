@@ -395,13 +395,6 @@ def render_create_agent_form():
             elif not user_prompt_template or len(user_prompt_template.strip()) < 10:
                 st.error("User prompt template must be at least 10 characters")
             else:
-                # Parse metadata
-                try:
-                    metadata = json.loads(metadata_json) if metadata_json.strip() else {}
-                except json.JSONDecodeError:
-                    st.error("Invalid JSON in metadata field")
-                    return
-
                 # Prepare payload
                 payload = {
                     "name": name.strip(),
@@ -415,8 +408,7 @@ def render_create_agent_form():
                     "is_active": is_active,
                     "is_system_default": False,
                     "description": description.strip() if description else None,
-                    "created_by": created_by.strip() if created_by else None,
-                    "metadata": metadata
+                    "created_by": created_by.strip() if created_by else None
                 }
 
                 try:
@@ -429,7 +421,6 @@ def render_create_agent_form():
                             for key in list(st.session_state.keys()):
                                 if key.startswith("agents_"):
                                     del st.session_state[key]
-                            st.balloons()
                         else:
                             st.error("Failed to create agent")
                 except Exception as e:
@@ -442,8 +433,13 @@ def render_manage_agents_view():
     """
     st.subheader("Manage Existing Agents")
 
+    # Add refresh button
+    col1, col2 = st.columns([4, 1])
+    with col2:
+        force_refresh = st.button("🔄 Refresh List", use_container_width=True)
+
     # Fetch all agents
-    agents, _ = fetch_agents_cached("All", include_inactive=True, force_refresh=False)
+    agents, _ = fetch_agents_cached("All", include_inactive=True, force_refresh=force_refresh)
 
     if not agents:
         st.info("No agents found. Create one in the 'Create Agent' tab.")
@@ -614,16 +610,16 @@ def render_toggle_active(agent: Dict):
 
     current_status = "Active" if agent['is_active'] else "Inactive"
     new_status = "Inactive" if agent['is_active'] else "Active"
+    new_is_active = not agent['is_active']
 
     st.info(f"Current status: **{current_status}**")
     st.warning(f"This will change the status to: **{new_status}**")
 
-    endpoint = f"{TEST_PLAN_AGENT_API}/{agent['id']}/{'deactivate' if agent['is_active'] else 'activate'}"
-
     if st.button(f"Confirm: Set to {new_status}", type="primary"):
         try:
             with st.spinner(f"Setting agent to {new_status}..."):
-                api_client.post(endpoint)
+                # Use the activate endpoint with is_active boolean
+                api_client.post(f"{TEST_PLAN_AGENT_API}/{agent['id']}/activate", data={"is_active": new_is_active})
                 st.success(f"Agent is now {new_status}")
                 for key in list(st.session_state.keys()):
                     if key.startswith("agents_"):
@@ -634,38 +630,73 @@ def render_toggle_active(agent: Dict):
 
 
 def render_delete_agent(agent: Dict):
-    """Delete agent with confirmation."""
+    """Delete agent with two-step workflow: deactivate first, then permanent delete."""
     st.subheader(f"Delete Agent: {agent['name']}")
 
     if agent['is_system_default']:
         st.error("Cannot delete system default agents")
         return
 
-    st.warning("**PERMANENT ACTION**: Deleting an agent cannot be undone.")
+    # Two-step delete process
+    if agent['is_active']:
+        st.warning("**STEP 1: Deactivate First**")
+        st.info("This agent is currently active. You must deactivate it before permanently deleting it.")
 
-    with st.expander("Agent to be deleted", expanded=True):
-        st.json({
-            "ID": agent['id'],
-            "Name": agent['name'],
-            "Type": agent['agent_type'],
-            "Created": agent.get('created_at')
-        })
+        with st.expander("Agent Details", expanded=True):
+            st.json({
+                "ID": agent['id'],
+                "Name": agent['name'],
+                "Type": agent['agent_type'],
+                "Status": "ACTIVE",
+                "Created": agent.get('created_at')
+            })
 
-    confirm_name = st.text_input(f"Type '{agent['name']}' to confirm deletion:")
-    confirm_check = st.checkbox("I understand this is permanent")
-
-    if confirm_name == agent['name'] and confirm_check:
-        if st.button("Confirm Deletion", type="secondary"):
+        if st.button("Deactivate Agent", type="primary"):
             try:
-                with st.spinner("Deleting agent..."):
-                    api_client.delete(f"{TEST_PLAN_AGENT_API}/{agent['id']}")
-                    st.success("Agent deleted successfully")
+                with st.spinner("Deactivating agent..."):
+                    # Use the activate endpoint with is_active=False
+                    api_client.post(f"{TEST_PLAN_AGENT_API}/{agent['id']}/activate", data={"is_active": False})
+                    st.success("Agent deactivated. You can now permanently delete it if needed.")
+                    # Clear cache
                     for key in list(st.session_state.keys()):
-                        if key.startswith("agents_"):
+                        if key.startswith("agents_") or key == "manage_agent_selector":
                             del st.session_state[key]
                     st.rerun()
             except Exception as e:
-                st.error(f"Error deleting agent: {str(e)}")
+                st.error(f"Error deactivating agent: {str(e)}")
+
+    else:
+        # Agent is already deactivated, allow permanent deletion
+        st.error("**STEP 2: Permanent Deletion**")
+        st.warning("This agent is deactivated. You can now permanently delete it if needed.")
+        st.warning("**⚠️ PERMANENT ACTION**: Deleting an agent cannot be undone.")
+
+        with st.expander("Agent to be deleted", expanded=True):
+            st.json({
+                "ID": agent['id'],
+                "Name": agent['name'],
+                "Type": agent['agent_type'],
+                "Status": "INACTIVE",
+                "Created": agent.get('created_at')
+            })
+
+        confirm_name = st.text_input(f"Type '{agent['name']}' to confirm permanent deletion:")
+        confirm_check = st.checkbox("I understand this action is permanent and cannot be undone")
+
+        if confirm_name == agent['name'] and confirm_check:
+            if st.button("⚠️ Permanently Delete Agent", type="secondary"):
+                try:
+                    with st.spinner("Permanently deleting agent..."):
+                        # Use soft_delete=false for permanent deletion
+                        api_client.delete(f"{TEST_PLAN_AGENT_API}/{agent['id']}?soft_delete=false")
+                        st.success("Agent permanently deleted")
+                        # Clear all agent-related cache and selector state
+                        for key in list(st.session_state.keys()):
+                            if key.startswith("agents_") or key == "manage_agent_selector":
+                                del st.session_state[key]
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error deleting agent: {str(e)}")
 
 
 def render_help_info():
@@ -765,33 +796,44 @@ def render_view_agent_sets():
     """View and manage existing agent sets with detailed agent information"""
     st.subheader("Existing Agent Sets")
 
-    # Fetch agent sets
+    # Filter options
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        search_term = st.text_input("Search by name", key="agent_set_search")
+    with col2:
+        show_inactive = st.checkbox("Show inactive", value=False, key="show_inactive_sets")
+    with col3:
+        if st.button("🔄 Refresh", use_container_width=True):
+            # Clear any cached data and force rerun
+            for key in list(st.session_state.keys()):
+                if key.startswith(("clone_set_", "edit_set_", "delete_set_")):
+                    st.session_state.pop(key)
+            st.rerun()
+
+    # Fetch agent sets with include_inactive parameter
     try:
-        response = api_client.get(AGENT_SET_API)
+        response = api_client.get(AGENT_SET_API, params={"include_inactive": show_inactive})
         agent_sets = response.get("agent_sets", [])
     except Exception as e:
         st.error(f"Failed to load agent sets: {e}")
         return
 
     if not agent_sets:
-        st.info("No agent sets found. Create your first agent set using the 'Create Agent Set' tab!")
+        if show_inactive:
+            st.info("No agent sets found (including inactive). Create your first agent set using the 'Create Agent Set' tab!")
+        else:
+            st.info("No active agent sets found. Try checking 'Show inactive' or create a new agent set!")
         return
 
-    # Filter options
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_term = st.text_input("Search by name", key="agent_set_search")
-    with col2:
-        show_inactive = st.checkbox("Show inactive", value=False, key="show_inactive_sets")
-
-    # Filter agent sets
+    # Apply search filter
     filtered_sets = agent_sets
-    if not show_inactive:
-        filtered_sets = [s for s in filtered_sets if s.get('is_active', True)]
     if search_term:
         filtered_sets = [s for s in filtered_sets if search_term.lower() in s.get('name', '').lower()]
 
-    st.write(f"**Total Agent Sets:** {len(filtered_sets)}")
+    # Show filter stats
+    active_count = len([s for s in filtered_sets if s.get('is_active', True)])
+    inactive_count = len([s for s in filtered_sets if not s.get('is_active', True)])
+    st.write(f"**Total Agent Sets:** {len(filtered_sets)} (Active: {active_count}, Inactive: {inactive_count})")
 
     # Fetch all agents for detailed display
     try:
@@ -805,7 +847,8 @@ def render_view_agent_sets():
     # Display agent sets
     for agent_set in filtered_sets:
         prefix = "[System Default]" if agent_set.get('is_system_default') else "[Custom]"
-        with st.expander(f"{prefix} {agent_set['name']}", expanded=False):
+        status = "[INACTIVE]" if not agent_set.get('is_active', True) else ""
+        with st.expander(f"{prefix} {status} {agent_set['name']}", expanded=False):
             col1, col2 = st.columns([3, 1])
 
             with col1:
@@ -870,32 +913,99 @@ def render_view_agent_sets():
                 # Activate/Deactivate button
                 if agent_set.get('is_active'):
                     if st.button("Deactivate", key=f"deactivate_{agent_set['id']}"):
-                        deactivate_agent_set(agent_set['id'])
+                        if deactivate_agent_set(agent_set['id']):
+                            st.rerun()
                 else:
                     if st.button("Activate", key=f"activate_{agent_set['id']}"):
-                        activate_agent_set(agent_set['id'])
+                        if activate_agent_set(agent_set['id']):
+                            st.rerun()
 
                 # Delete button (not for system defaults)
                 if not agent_set.get('is_system_default'):
                     if st.button("Delete", key=f"delete_{agent_set['id']}", type="secondary"):
-                        if st.session_state.get(f'confirm_delete_{agent_set["id"]}'):
-                            delete_agent_set(agent_set['id'])
-                        else:
-                            st.session_state[f'confirm_delete_{agent_set["id"]}'] = True
-                            st.warning("Click again to confirm deletion")
+                        st.session_state[f'delete_set_{agent_set["id"]}'] = True
 
             # Handle clone dialog
             if st.session_state.get(f'clone_set_{agent_set["id"]}'):
                 st.write("---")
+                st.subheader("Clone Agent Set")
                 new_name = st.text_input(
                     "New name for cloned set:",
                     value=f"{agent_set['name']} (Copy)",
                     key=f"clone_name_{agent_set['id']}"
                 )
-                if st.button("Confirm Clone", key=f"confirm_clone_{agent_set['id']}"):
-                    clone_agent_set(agent_set['id'], new_name)
-                    st.session_state.pop(f'clone_set_{agent_set["id"]}')
+
+                if not new_name or len(new_name.strip()) < 3:
+                    st.warning("Name must be at least 3 characters")
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Confirm Clone", key=f"confirm_clone_{agent_set['id']}", type="primary", disabled=not new_name or len(new_name.strip()) < 3):
+                        if clone_agent_set(agent_set['id'], new_name.strip()):
+                            st.session_state.pop(f'clone_set_{agent_set["id"]}')
+                            st.rerun()
+                with col_b:
+                    if st.button("Cancel Clone", key=f"cancel_clone_{agent_set['id']}"):
+                        st.session_state.pop(f'clone_set_{agent_set["id"]}')
+                        st.rerun()
+
+            # Handle edit dialog
+            if st.session_state.get(f'edit_set_{agent_set["id"]}'):
+                st.write("---")
+                st.info("Edit functionality: Use the form below to modify the agent set")
+                # TODO: Add full edit implementation
+                if st.button("Cancel Edit", key=f"cancel_edit_{agent_set['id']}"):
+                    st.session_state.pop(f'edit_set_{agent_set["id"]}')
                     st.rerun()
+
+            # Handle delete confirmation dialog
+            if st.session_state.get(f'delete_set_{agent_set["id"]}'):
+                st.write("---")
+
+                # Two-step delete process
+                if agent_set.get('is_active', True):
+                    # Step 1: Deactivate first
+                    st.warning("**STEP 1: Deactivate First**")
+                    st.info(f"This agent set is currently active. You must deactivate it before permanently deleting it.")
+
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("Deactivate Agent Set", key=f"deactivate_for_delete_{agent_set['id']}", type="primary"):
+                            if deactivate_agent_set(agent_set['id']):
+                                st.success("Agent set deactivated. Refresh to see the permanent delete option.")
+                                st.session_state.pop(f'delete_set_{agent_set["id"]}')
+                                st.rerun()
+                    with col_b:
+                        if st.button("Cancel", key=f"cancel_delete_{agent_set['id']}"):
+                            st.session_state.pop(f'delete_set_{agent_set["id"]}')
+                            st.rerun()
+                else:
+                    # Step 2: Permanent deletion for inactive sets
+                    st.error("**STEP 2: Permanent Deletion**")
+                    st.warning(f"This agent set is deactivated. You can now permanently delete it if needed.")
+                    st.warning("**⚠️ PERMANENT ACTION**: Deleting an agent set cannot be undone.")
+
+                    confirm_name = st.text_input(
+                        f"Type '{agent_set['name']}' to confirm permanent deletion:",
+                        key=f"delete_confirm_name_{agent_set['id']}"
+                    )
+
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if confirm_name == agent_set['name']:
+                            if st.button("⚠️ Permanently Delete Agent Set", key=f"confirm_delete_{agent_set['id']}", type="secondary"):
+                                if delete_agent_set(agent_set['id'], permanent=True):
+                                    # Clean up all session state related to this agent set
+                                    st.session_state.pop(f'delete_set_{agent_set["id"]}', None)
+                                    st.session_state.pop(f'clone_set_{agent_set["id"]}', None)
+                                    st.session_state.pop(f'edit_set_{agent_set["id"]}', None)
+                                    st.rerun()
+                        else:
+                            st.button("⚠️ Permanently Delete Agent Set", key=f"confirm_delete_{agent_set['id']}", type="secondary", disabled=True)
+                    with col_b:
+                        if st.button("Cancel", key=f"cancel_delete_final_{agent_set['id']}"):
+                            st.session_state.pop(f'delete_set_{agent_set["id"]}')
+                            st.rerun()
 
 
 def render_create_agent_set():
@@ -1081,50 +1191,85 @@ def render_agent_set_analytics():
 
 
 # Helper functions for agent set operations
-def clone_agent_set(set_id: int, new_name: str):
-    """Clone an existing agent set"""
+def clone_agent_set(set_id: int, new_name: str) -> bool:
+    """Clone an existing agent set. Returns True on success, False on failure."""
     try:
         response = api_client.post(
             f"{AGENT_SET_API}/{set_id}/clone",
             data={"new_name": new_name}
         )
-        st.success(f"Agent set cloned as '{new_name}'")
-        st.rerun()
+        if response:
+            st.success(f"Agent set cloned as '{new_name}'")
+            return True
+        else:
+            st.error("Failed to clone agent set: No response from API")
+            return False
     except Exception as e:
         st.error(f"Failed to clone agent set: {e}")
+        return False
 
 
-def delete_agent_set(set_id: int):
-    """Delete an agent set"""
+def delete_agent_set(set_id: int, permanent: bool = False) -> bool:
+    """
+    Delete an agent set.
+
+    Args:
+        set_id: The ID of the agent set to delete
+        permanent: If True, permanently delete. If False, just deactivate (soft delete)
+
+    Returns:
+        True on success, False on failure
+    """
     try:
-        api_client.delete(f"{AGENT_SET_API}/{set_id}")
-        st.success("Agent set deleted successfully")
-        st.rerun()
+        if permanent:
+            # Permanent deletion
+            response = api_client.delete(f"{AGENT_SET_API}/{set_id}?soft_delete=false")
+        else:
+            # Soft delete (deactivate)
+            response = api_client.delete(f"{AGENT_SET_API}/{set_id}")
+
+        if response:
+            st.success(f"Agent set {'permanently deleted' if permanent else 'deactivated'} successfully")
+            return True
+        else:
+            st.error("Failed to delete agent set: No response from API")
+            return False
     except Exception as e:
         st.error(f"Failed to delete agent set: {e}")
+        return False
 
 
-def activate_agent_set(set_id: int):
-    """Activate an agent set"""
+def activate_agent_set(set_id: int) -> bool:
+    """Activate an agent set. Returns True on success, False on failure."""
     try:
-        api_client.put(
+        response = api_client.put(
             f"{AGENT_SET_API}/{set_id}",
             data={"is_active": True}
         )
-        st.success("Agent set activated")
-        st.rerun()
+        if response:
+            st.success("Agent set activated")
+            return True
+        else:
+            st.error("Failed to activate agent set: No response from API")
+            return False
     except Exception as e:
         st.error(f"Failed to activate agent set: {e}")
+        return False
 
 
-def deactivate_agent_set(set_id: int):
-    """Deactivate an agent set"""
+def deactivate_agent_set(set_id: int) -> bool:
+    """Deactivate an agent set. Returns True on success, False on failure."""
     try:
-        api_client.put(
+        response = api_client.put(
             f"{AGENT_SET_API}/{set_id}",
             data={"is_active": False}
         )
-        st.success("Agent set deactivated")
-        st.rerun()
+        if response:
+            st.success("Agent set deactivated")
+            return True
+        else:
+            st.error("Failed to deactivate agent set: No response from API")
+            return False
     except Exception as e:
         st.error(f"Failed to deactivate agent set: {e}")
+        return False

@@ -446,7 +446,7 @@ def render_test_card_executor():
         export_col1, export_col2 = st.columns(2)
 
         with export_col1:
-            if st.button("📄 Export to DOCX", use_container_width=True, type="primary"):
+            if st.button("Export to DOCX", use_container_width=True, type="primary"):
                 try:
                     import requests
                     export_response = requests.post(
@@ -477,7 +477,7 @@ def render_test_card_executor():
                     st.error(f"Export failed: {str(e)}")
 
         with export_col2:
-            if st.button("📝 Export to Markdown", use_container_width=True, type="secondary"):
+            if st.button("Export to Markdown", use_container_width=True, type="secondary"):
                 try:
                     import requests
                     export_response = requests.post(

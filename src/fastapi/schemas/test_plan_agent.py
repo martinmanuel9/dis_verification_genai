@@ -13,7 +13,7 @@ class TestPlanAgentBase(BaseModel):
     """Base schema for test plan agent"""
     name: str = Field(..., min_length=1, max_length=200, description="Agent name")
     agent_type: str = Field(..., description="Type of agent (actor, critic, contradiction, gap_analysis)")
-    workflow_type: str = Field(..., description="Workflow category (document_analysis, test_plan_generation, general)")
+    workflow_type: Optional[str] = Field(default="general", description="Workflow category (document_analysis, test_plan_generation, general)")
     model_name: str = Field(..., description="LLM model identifier (e.g., 'gpt-4', 'claude-3-5-sonnet')")
     system_prompt: str = Field(..., min_length=10, description="System-level instruction prompt")
     user_prompt_template: str = Field(..., min_length=10, description="Template for user prompts")
@@ -35,9 +35,10 @@ class TestPlanAgentBase(BaseModel):
     @classmethod
     def validate_workflow_type(cls, v):
         """Validate workflow type - distinguishes agent purpose"""
-        valid_types = ['document_analysis', 'test_plan_generation', 'general']
-        if v not in valid_types:
-            raise ValueError(f"workflow_type must be one of: {', '.join(valid_types)}")
+        if v is not None:
+            valid_types = ['document_analysis', 'test_plan_generation', 'general']
+            if v not in valid_types:
+                raise ValueError(f"workflow_type must be one of: {', '.join(valid_types)}")
         return v
 
     # Removed strict placeholder validation - different agent types use different placeholders
@@ -48,6 +49,7 @@ class TestPlanAgentBase(BaseModel):
 
 class CreateTestPlanAgentRequest(TestPlanAgentBase):
     """Request schema for creating a test plan agent"""
+    workflow_type: str = Field(..., description="Workflow category (document_analysis, test_plan_generation, general)")
     is_system_default: bool = Field(default=False, description="Whether this is a system default agent")
     is_active: bool = Field(default=True, description="Whether agent is active")
     created_by: Optional[str] = Field(None, description="User creating the agent")

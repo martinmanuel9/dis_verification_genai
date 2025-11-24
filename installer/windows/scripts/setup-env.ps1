@@ -48,15 +48,78 @@ Write-Host ""
 # Check if .env already exists
 if (Test-Path $EnvFile) {
     Write-Warning ".env file already exists"
-    $reconfigure = Read-Host "Do you want to reconfigure? (y/N)"
-    if ($reconfigure -ne "y" -and $reconfigure -ne "Y") {
-        Write-Info "Configuration cancelled"
-        exit 0
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  1) Keep existing configuration (exit)"
+    Write-Host "  2) Reconfigure interactively"
+    Write-Host "  3) Import from .env file (paste contents)"
+    Write-Host "  4) Import from .env file (select file)"
+    $option = Read-Host "Choice [1-4]"
+
+    switch ($option) {
+        "1" {
+            Write-Info "Configuration cancelled - keeping existing .env"
+            exit 0
+        }
+        "2" {
+            # Continue with interactive configuration
+            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            Copy-Item $EnvFile "$EnvFile.backup.$timestamp"
+            Write-Info "Existing configuration backed up to .env.backup.$timestamp"
+        }
+        "3" {
+            # Import from pasted content
+            Write-Info "Paste your .env file contents below."
+            Write-Info "Press Ctrl+Z then Enter when done (or type END on a new line):"
+            Write-Host ""
+
+            $lines = @()
+            do {
+                $line = Read-Host
+                if ($line -eq "END") { break }
+                $lines += $line
+            } while ($true)
+
+            $content = $lines -join "`n"
+            if ($content.Trim()) {
+                $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+                Copy-Item $EnvFile "$EnvFile.backup.$timestamp"
+                Set-Content -Path $EnvFile -Value $content
+                Write-Success ".env file updated from pasted content"
+                Write-Info "Previous configuration backed up to .env.backup.$timestamp"
+                exit 0
+            } else {
+                Write-Warning "No content provided, continuing with interactive setup"
+            }
+        }
+        "4" {
+            # Import from file
+            Add-Type -AssemblyName System.Windows.Forms
+            $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+            $openFileDialog.Title = "Select .env file"
+            $openFileDialog.Filter = "Environment files (*.env)|*.env|All files (*.*)|*.*"
+            $openFileDialog.InitialDirectory = [Environment]::GetFolderPath('MyDocuments')
+
+            if ($openFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                $selectedFile = $openFileDialog.FileName
+                if (Test-Path $selectedFile) {
+                    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+                    Copy-Item $EnvFile "$EnvFile.backup.$timestamp"
+                    Copy-Item $selectedFile $EnvFile -Force
+                    Write-Success ".env file updated from: $selectedFile"
+                    Write-Info "Previous configuration backed up to .env.backup.$timestamp"
+                    exit 0
+                } else {
+                    Write-Warning "Selected file not found, continuing with interactive setup"
+                }
+            } else {
+                Write-Warning "No file selected, continuing with interactive setup"
+            }
+        }
+        default {
+            Write-Info "Invalid option, continuing with interactive setup"
+        }
     }
-    # Backup existing
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    Copy-Item $EnvFile "$EnvFile.backup.$timestamp"
-    Write-Info "Existing configuration backed up"
 }
 
 # Start with template

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- Custom UI sequence that adds the .env configuration dialog -->
+    <UI Id="CustomInstallDir">
+      <!-- Reference the standard InstallDir dialog set -->
+      <UIRef Id="WixUI_InstallDir" />
+
+      <!-- Add our custom environment configuration dialog -->
+      <DialogRef Id="EnvConfigDlg" />
+
+      <!-- Customize the dialog sequence to insert our custom dialog -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="EnvConfigDlg" Order="3">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="EnvConfigDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="EnvConfigDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg">1</Publish>
+
+      <!-- Update InstallDirDlg back button to go to our custom dialog -->
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="EnvConfigDlg">1</Publish>
+    </UI>
+
+    <!-- Custom Dialog for .env configuration -->
+    <UI>
+      <Dialog Id="EnvConfigDlg" Width="370" Height="270" Title="[ProductName] - Environment Configuration">
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
+          <Text>{\WixUI_Font_Title}Environment Configuration</Text>
+        </Control>
+
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="20" Transparent="yes" NoPrefix="yes">
+          <Text>You can paste your existing .env file contents below, or configure it later.</Text>
+        </Control>
+
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+
+        <!-- Option selection -->
+        <Control Id="ConfigureNowRadio" Type="RadioButtonGroup" X="20" Y="50" Width="330" Height="40" Property="ENV_CONFIG_OPTION">
+          <RadioButtonGroup Property="ENV_CONFIG_OPTION">
+            <RadioButton Text="Paste .env file contents now" Value="PASTE" X="0" Y="0" Width="300" Height="17" />
+            <RadioButton Text="Configure environment later (recommended for new users)" Value="LATER" X="0" Y="20" Width="300" Height="17" />
+          </RadioButtonGroup>
+        </Control>
+
+        <!-- Multi-line text box for .env contents -->
+        <Control Id="EnvContentLabel" Type="Text" X="20" Y="95" Width="330" Height="10" NoPrefix="yes">
+          <Text>Paste your .env file contents here:</Text>
+          <Condition Action="show">ENV_CONFIG_OPTION = "PASTE"</Condition>
+          <Condition Action="hide">ENV_CONFIG_OPTION &lt;&gt; "PASTE"</Condition>
+        </Control>
+
+        <Control Id="EnvContentEdit" Type="Edit" X="20" Y="107" Width="330" Height="100" Property="ENV_FILE_CONTENT" Multiline="yes">
+          <Condition Action="enable">ENV_CONFIG_OPTION = "PASTE"</Condition>
+          <Condition Action="disable">ENV_CONFIG_OPTION &lt;&gt; "PASTE"</Condition>
+        </Control>
+
+        <!-- Info text when "Later" is selected -->
+        <Control Id="LaterInfoText" Type="Text" X="20" Y="107" Width="330" Height="60" NoPrefix="yes">
+          <Text>You will be able to configure your environment using the interactive setup wizard after installation completes. This is recommended for first-time users.</Text>
+          <Condition Action="show">ENV_CONFIG_OPTION = "LATER"</Condition>
+          <Condition Action="hide">ENV_CONFIG_OPTION &lt;&gt; "LATER"</Condition>
+        </Control>
+
+        <!-- Navigation buttons -->
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+      </Dialog>
+    </UI>
+  </Fragment>
+</Wix>

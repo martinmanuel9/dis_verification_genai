@@ -31,6 +31,10 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/martinmanuel9/dis_verification_genai" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/martinmanuel9/dis_verification_genai" />
 
+    <!-- Environment configuration properties -->
+    <Property Id="ENV_CONFIG_OPTION" Value="LATER" />
+    <Property Id="ENV_FILE_CONTENT" Value="" />
+
 
     <!-- Feature definition -->
     <Feature Id="ProductFeature" Title="DIS Verification GenAI" Level="1">
@@ -59,14 +63,35 @@
                   Return="ignore"
                   Impersonate="yes" />
 
+    <!-- Custom action to create .env file from user input -->
+    <CustomAction Id="SetCreateEnvCommand"
+                  Property="CreateEnvFile"
+                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\create-env-from-input.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvContent &quot;[ENV_FILE_CONTENT]&quot;"
+                  Execute="immediate" />
+
+    <CustomAction Id="CreateEnvFile"
+                  Property="CreateEnvFile"
+                  ExeCommand="[CreateEnvFile]"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="yes" />
+
     <InstallExecuteSequence>
+      <!-- Create .env file during installation -->
+      <Custom Action="SetCreateEnvCommand" Before="InstallFinalize">NOT Installed</Custom>
+      <Custom Action="CreateEnvFile" Before="InstallFinalize">NOT Installed</Custom>
+
+      <!-- Launch setup wizard after installation -->
       <Custom Action="SetLaunchCommand" Before="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
       <Custom Action="LaunchSetupWizard" After="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
     </InstallExecuteSequence>
 
     <!-- UI -->
-    <UIRef Id="WixUI_InstallDir" />
+    <UIRef Id="CustomInstallDir" />
     <UIRef Id="WixUI_ErrorProgressText" />
+
+    <!-- License Agreement -->
+    <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
 
   </Product>
 

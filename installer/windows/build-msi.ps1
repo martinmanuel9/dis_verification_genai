@@ -87,22 +87,14 @@ Write-Info "Copying scripts directory..."
 Copy-Item -Recurse "$ProjectRoot\scripts" $stagingDir
 Copy-Item -Recurse "$PSScriptRoot\scripts\*" "$stagingDir\scripts" -Force
 
-# Create LICENSE.rtf if it doesn't exist (required by WiX UI)
-$licenseFile = "$ProjectRoot\LICENSE.rtf"
+# Copy LICENSE.rtf (required by WiX UI)
+$licenseFile = "$PSScriptRoot\LICENSE.rtf"
 if (-not (Test-Path $licenseFile)) {
-    Write-Info "Creating LICENSE.rtf..."
-    @"
-{\rtf1\ansi\ansicpg1252\deff0\nouicompat{\fonttbl{\f0\fnil\fcharset0 Calibri;}}
-{\*\generator Riched20 10.0.19041}\viewkind4\uc1
-\pard\sa200\sl276\slmult1\f0\fs22\lang9 DIS Verification GenAI\par
-Copyright (c) 2024. All rights reserved.\par
-\par
-This software is provided for use under the terms specified in the project repository.\par
-See: https://github.com/martinmanuel9/dis_verification_genai\par
+    Write-ErrorMsg "LICENSE.rtf not found at: $licenseFile"
+    Write-ErrorMsg "Please ensure installer/windows/LICENSE.rtf exists"
+    exit 1
 }
-"@ | Out-File -FilePath $licenseFile -Encoding ASCII
-}
-Copy-Item $licenseFile $stagingDir
+Copy-Item $licenseFile $buildDir
 
 Write-Success "All files copied to staging"
 
@@ -111,7 +103,8 @@ Write-Info "Verifying critical files..."
 $criticalScripts = @(
     "scripts\setup-env.ps1",
     "scripts\post-install.ps1",
-    "scripts\check_prerequisites.ps1"
+    "scripts\check_prerequisites.ps1",
+    "scripts\create-env-from-input.ps1"
 )
 
 foreach ($script in $criticalScripts) {
@@ -149,9 +142,20 @@ $productWxsContent = $productWxsContent -replace 'VERSION_PLACEHOLDER', $Version
 $productWxsBuild = "$buildDir\Product.wxs"
 Set-Content -Path $productWxsBuild -Value $productWxsContent
 
+# Copy CustomUI.wxs to build directory
+$customUIWxs = "$PSScriptRoot\CustomUI.wxs"
+if (Test-Path $customUIWxs) {
+    Copy-Item $customUIWxs $buildDir
+    Write-Info "CustomUI.wxs copied to build directory"
+} else {
+    Write-ErrorMsg "CustomUI.wxs not found at: $customUIWxs"
+    exit 1
+}
+
 # Compile .wxs files to .wixobj
 Write-Info "Compiling WiX sources..."
-$wixFiles = @($productWxsBuild, $fragmentFile)
+$customUIBuild = "$buildDir\CustomUI.wxs"
+$wixFiles = @($productWxsBuild, $fragmentFile, $customUIBuild)
 $wixObjs = @()
 
 foreach ($wxsFile in $wixFiles) {

@@ -149,6 +149,7 @@ jobs:
           Copy-Item -Recurse scripts $stagingDir
           Copy-Item -Recurse installer/windows/scripts/* $stagingDir/scripts -Force
           Copy-Item docker-compose.yml $stagingDir
+          Copy-Item Dockerfile.base $stagingDir
           Copy-Item .env.template $stagingDir
           Copy-Item VERSION $stagingDir
           Copy-Item CHANGELOG.md $stagingDir
@@ -189,6 +190,13 @@ jobs:
 
           # Update Product.wxs
           (Get-Content installer/windows/Product.wxs) -replace 'VERSION_PLACEHOLDER', $version | Set-Content installer/windows/Product_build.wxs
+
+          # Copy icon file to installer directory if it exists
+          if (Test-Path "installer/windows/app-icon.ico") {
+              Write-Host "Icon file found, will be included in installer"
+          } else {
+              Write-Host "Warning: Icon file not found at installer/windows/app-icon.ico"
+          }
 
           Write-Host "Version updated to: $version"
           Write-Host "Staging path: $stagingPath"

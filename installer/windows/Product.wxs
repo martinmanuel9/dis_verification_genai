@@ -32,8 +32,8 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/martinmanuel9/dis_verification_genai" />
 
     <!-- Add/Remove Programs Icon -->
-    <!-- <Property Id="ARPPRODUCTICON" Value="AppIcon" /> -->
-    <!-- <Icon Id="AppIcon" SourceFile="app-icon.ico" /> -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Icon Id="AppIcon" SourceFile="app-icon.ico" />
 
     <!-- Feature definition -->
     <Feature Id="ProductFeature" Title="DIS Verification GenAI" Level="1">
@@ -63,21 +63,15 @@
                   Impersonate="yes" />
 
     <!-- Custom action to create .env file from user input -->
-    <CustomAction Id="SetCreateEnvCommand"
-                  Property="CreateEnvFile"
-                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\create-env-from-input.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvContent &quot;[ENV_FILE_CONTENT]&quot;"
-                  Execute="immediate" />
-
     <CustomAction Id="CreateEnvFile"
-                  Property="CreateEnvFile"
-                  ExeCommand="[CreateEnvFile]"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;scripts\create-env-from-input.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvContent &quot;[ENV_FILE_CONTENT]&quot;"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="yes" />
 
     <InstallExecuteSequence>
       <!-- Create .env file during installation -->
-      <Custom Action="SetCreateEnvCommand" Before="InstallFinalize">NOT Installed</Custom>
       <Custom Action="CreateEnvFile" Before="InstallFinalize">NOT Installed</Custom>
 
       <!-- Launch setup wizard after installation -->
@@ -117,9 +111,9 @@
                   Description="Launch DIS Verification GenAI Web Interface"
                   Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
                   Arguments='-NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\launch-app.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot;'
-                  WorkingDirectory="INSTALLFOLDER">
-          <!-- Icon="AppIcon" IconIndex="0" (uncomment when app-icon.ico is added) -->
-        </Shortcut>
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon"
+                  IconIndex="0" />
 
         <Shortcut Id="ConfigurationShortcut"
                   Name="Configure Environment"
@@ -158,9 +152,9 @@
                   Description="Launch DIS Verification GenAI Web Interface"
                   Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
                   Arguments='-NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\launch-app.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot;'
-                  WorkingDirectory="INSTALLFOLDER">
-          <!-- Icon="AppIcon" IconIndex="0" (uncomment when app-icon.ico is added) -->
-        </Shortcut>
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon"
+                  IconIndex="0" />
         <RemoveFolder Id="CleanUpDesktopShortCut" On="uninstall"/>
         <RegistryValue Root="HKCU"
                        Key="Software\[Manufacturer]\[ProductName]"

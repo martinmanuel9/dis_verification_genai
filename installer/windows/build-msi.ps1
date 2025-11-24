@@ -63,6 +63,7 @@ Write-Info "Copying application files to staging directory..."
 # Required files
 $requiredFiles = @(
     "docker-compose.yml",
+    "Dockerfile.base",
     ".env.template",
     "VERSION",
     "CHANGELOG.md",
@@ -95,6 +96,16 @@ if (-not (Test-Path $licenseFile)) {
     exit 1
 }
 Copy-Item $licenseFile $buildDir
+
+# Copy icon file (optional)
+$iconFile = "$PSScriptRoot\app-icon.ico"
+if (Test-Path $iconFile) {
+    Copy-Item $iconFile $buildDir
+    Write-Info "Icon file copied to build directory"
+} else {
+    Write-Warning "Icon file not found at: $iconFile"
+    Write-Warning "Installer will use default icon. Run create-icon.py to create one."
+}
 
 Write-Success "All files copied to staging"
 

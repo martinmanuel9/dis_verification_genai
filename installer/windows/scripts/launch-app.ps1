@@ -53,6 +53,32 @@ if (-not $dockerRunning) {
 Write-Success "Docker is running"
 Set-Location $InstallDir
 
+# Check if .env file exists
+$envFile = Join-Path $InstallDir ".env"
+if (-not (Test-Path $envFile)) {
+    Write-ErrorMsg ".env file not found!"
+    Write-Info "Please run the 'Configure Environment' shortcut first"
+    Write-Info "or copy your .env file to: $InstallDir"
+    Write-Host ""
+    Write-Host "Press any key to exit..."
+    $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 1
+}
+
+# Verify Dockerfile.base exists
+$dockerfileBase = Join-Path $InstallDir "Dockerfile.base"
+if (-not (Test-Path $dockerfileBase)) {
+    Write-ErrorMsg "Dockerfile.base not found at: $dockerfileBase"
+    Write-Info "Installation may be corrupted. Please reinstall the application."
+    Write-Host ""
+    Write-Host "Press any key to exit..."
+    $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 1
+}
+
+Write-Success ".env file found"
+Write-Info "Current directory: $InstallDir"
+
 # Check if images exist
 $imagesExist = $false
 try {

@@ -31,11 +31,6 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/martinmanuel9/dis_verification_genai" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/martinmanuel9/dis_verification_genai" />
 
-    <!-- Environment configuration properties -->
-    <Property Id="ENV_CONFIG_OPTION" Value="LATER" />
-    <Property Id="ENV_FILE_CONTENT" />
-
-
     <!-- Feature definition -->
     <Feature Id="ProductFeature" Title="DIS Verification GenAI" Level="1">
       <ComponentGroupRef Id="ApplicationFiles" />

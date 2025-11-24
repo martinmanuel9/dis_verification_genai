@@ -69,5 +69,9 @@
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
       </Dialog>
     </UI>
+
+    <!-- Properties for the dialog -->
+    <Property Id="ENV_CONFIG_OPTION" Value="LATER" />
+    <Property Id="ENV_FILE_CONTENT" />
   </Fragment>
 </Wix>

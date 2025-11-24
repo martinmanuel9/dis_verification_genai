@@ -63,24 +63,21 @@
                   Impersonate="yes" />
 
     <!-- Custom action to create .env file from user input -->
-    <!-- Step 1: Set property with data for deferred action -->
-    <CustomAction Id="SetCreateEnvData"
-                  Property="CreateEnvFileDeferred"
-                  Value="INSTALLDIR=[INSTALLFOLDER];ENVCONTENT=[ENV_FILE_CONTENT]"
-                  Execute="immediate" />
-
-    <!-- Step 2: Execute the deferred action -->
-    <CustomAction Id="CreateEnvFileDeferred"
-                  Directory="INSTALLFOLDER"
-                  Execute="deferred"
-                  Impersonate="no"
+    <!-- Use dedicated PowerShell script with visible window for debugging -->
+    <SetProperty Id="CreateEnvFile"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\create-env.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvContent &quot;[ENV_FILE_CONTENT]&quot;"
+                 Sequence="execute"
+                 Before="CreateEnvFile" />
+    <CustomAction Id="CreateEnvFile"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="immediate"
                   Return="ignore"
-                  ExeCommand="[System64Folder]cmd.exe /c echo.[CustomActionData] > nul &amp;&amp; powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;$data = '[CustomActionData]'; $parts = $data.Split(';'); $dir = ($parts[0] -split '=')[1]; $content = ($parts[1] -split '=',2)[1]; $envPath = Join-Path $dir '.env'; if ($content -and $content.Trim()) { Set-Content -Path $envPath -Value $content -Force } else { $template = Join-Path $dir '.env.template'; if (Test-Path $template) { Copy-Item $template $envPath -Force } }&quot;" />
+                  Impersonate="yes" />
 
     <InstallExecuteSequence>
       <!-- Create .env file during installation -->
-      <Custom Action="SetCreateEnvData" After="InstallFiles">NOT Installed</Custom>
-      <Custom Action="CreateEnvFileDeferred" After="SetCreateEnvData">NOT Installed</Custom>
+      <Custom Action="CreateEnvFile" After="InstallFiles">NOT Installed AND ENV_FILE_CONTENT</Custom>
 
       <!-- Launch setup wizard after installation -->
       <Custom Action="SetLaunchCommand" Before="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>

@@ -42,15 +42,16 @@
     </Feature>
 
     <!-- Custom action to copy .env file during installation -->
-    <SetProperty Id="CopyEnvFile"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -Command &quot;if (-not (Test-Path '[ENV_FILE_PATH]')) { Write-Host 'ERROR: .env file not found at [ENV_FILE_PATH]'; exit 1 }; Copy-Item '[ENV_FILE_PATH]' '[INSTALLFOLDER].env' -Force; Write-Host 'Copied .env file successfully'; exit 0&quot;"
-                 Sequence="execute"
-                 Before="CopyEnvFile" />
+    <CustomAction Id="SetCopyEnvFileCommand"
+                  Property="CopyEnvFile"
+                  Value="&quot;[System64Folder]cmd.exe&quot; /c &quot;copy &quot;[ENV_FILE_PATH]&quot; &quot;[INSTALLFOLDER].env&quot; &quot;"
+                  Execute="immediate" />
+
     <CustomAction Id="CopyEnvFile"
                   BinaryKey="WixCA"
                   DllEntry="WixQuietExec"
                   Execute="deferred"
-                  Return="check"
+                  Return="ignore"
                   Impersonate="no" />
 
     <!-- Custom action to run setup script during installation with progress -->
@@ -66,6 +67,9 @@
                   Impersonate="yes" />
 
     <InstallExecuteSequence>
+      <!-- Set command for copying .env file -->
+      <Custom Action="SetCopyEnvFileCommand" Before="CopyEnvFile">NOT Installed AND ENV_FILE_PATH</Custom>
+
       <!-- Copy .env file (REQUIRED) -->
       <Custom Action="CopyEnvFile" After="InstallFiles">NOT Installed AND ENV_FILE_PATH</Custom>
 

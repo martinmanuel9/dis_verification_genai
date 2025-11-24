@@ -156,12 +156,19 @@ if (Test-Path $customUIWxs) {
 Write-Info "Compiling WiX sources..."
 $customUIBuild = "$buildDir\CustomUI.wxs"
 $wixFiles = @($productWxsBuild, $fragmentFile, $customUIBuild)
+Write-Info "Files to compile: $($wixFiles.Count)"
+foreach ($f in $wixFiles) {
+    Write-Info "  - $f (exists: $(Test-Path $f))"
+}
 $wixObjs = @()
 
 foreach ($wxsFile in $wixFiles) {
+    Write-Host ""
+    Write-Info "==== Compiling: $wxsFile ===="
     $wixObj = $wxsFile -replace '\.wxs$', '.wixobj'
     $wixObjs += $wixObj
 
+    Write-Info "Command: candle.exe $wxsFile -out $wixObj"
     & $candleExe $wxsFile `
         -dStagingDir="$stagingDir" `
         -dVersion=$Version `
@@ -171,9 +178,10 @@ foreach ($wxsFile in $wixFiles) {
         -ext WixUtilExtension
 
     if ($LASTEXITCODE -ne 0) {
-        Write-ErrorMsg "candle.exe failed for $wxsFile"
+        Write-ErrorMsg "candle.exe failed for $wxsFile with exit code: $LASTEXITCODE"
         exit 1
     }
+    Write-Success "Successfully compiled: $wxsFile -> $wixObj"
 }
 Write-Success "WiX sources compiled"
 

@@ -65,10 +65,6 @@
                   Return="ignore"
                   Impersonate="yes" />
 
-    <!-- Progress text for custom actions -->
-    <ProgressText Action="CopyEnvFile">Copying environment configuration...</ProgressText>
-    <ProgressText Action="RunSetupScript">Configuring system and downloading models (this may take 10-20 minutes)...</ProgressText>
-
     <InstallExecuteSequence>
       <!-- Copy .env file (REQUIRED) -->
       <Custom Action="CopyEnvFile" After="InstallFiles">NOT Installed AND ENV_FILE_PATH</Custom>
@@ -80,6 +76,12 @@
     <!-- UI -->
     <UIRef Id="CustomInstallDir" />
     <UIRef Id="WixUI_ErrorProgressText" />
+
+    <!-- Progress text for custom actions -->
+    <UI>
+      <ProgressText Action="CopyEnvFile">Copying environment configuration...</ProgressText>
+      <ProgressText Action="RunSetupScript">Configuring system and downloading models (this may take 10-20 minutes)...</ProgressText>
+    </UI>
 
     <!-- License Agreement -->
     <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />

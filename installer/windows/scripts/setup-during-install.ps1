@@ -9,11 +9,16 @@ param(
     [string]$EnvFilePath = ""
 )
 
+# Set error handling - stop on errors
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"  # Don't show progress bars in MSI context
+
 # Use Write-Host for MSI logging - it will appear in the installer progress
 function Write-Log {
     param([string]$Message)
     Write-Host "CustomAction: $Message"
-    Start-Sleep -Milliseconds 100  # Brief pause so MSI can capture output
+    [System.Console]::Out.Flush()  # Force flush output
+    Start-Sleep -Milliseconds 50  # Brief pause so MSI can capture output
 }
 
 function Write-Progress-Step {
@@ -58,12 +63,18 @@ try {
 
     $dockerRunning = $false
     try {
-        $null = docker info 2>&1
+        Write-Log "Checking Docker status..."
+        $dockerInfo = docker info 2>&1 | Out-String
+
         if ($LASTEXITCODE -eq 0) {
             $dockerRunning = $true
             Write-Log "Docker is running"
+            Write-Log "Docker info retrieved successfully"
+        } else {
+            Write-Log "Docker info command failed with exit code: $LASTEXITCODE"
         }
     } catch {
+        Write-Log "Exception while checking Docker: $($_.Exception.Message)"
         $dockerRunning = $false
     }
 
@@ -145,11 +156,37 @@ try {
 
         # Download embedding model
         Write-Log "Downloading embedding model: snowflake-arctic-embed2"
-        ollama pull snowflake-arctic-embed2 2>&1 | ForEach-Object { Write-Log $_ }
+        try {
+            $pullOutput = ollama pull snowflake-arctic-embed2 2>&1
+            if ($pullOutput) {
+                $pullOutput | ForEach-Object {
+                    if ($_ -and $_.ToString().Trim()) {
+                        Write-Log $_
+                    }
+                }
+            }
+            Write-Log "Embedding model downloaded successfully"
+        } catch {
+            Write-Log "WARNING: Failed to download embedding model: $($_.Exception.Message)"
+            Write-Log "You can download it later using: ollama pull snowflake-arctic-embed2"
+        }
 
         # Download LLM model
         Write-Log "Downloading LLM model: $recommendedModel"
-        ollama pull $recommendedModel 2>&1 | ForEach-Object { Write-Log $_ }
+        try {
+            $pullOutput = ollama pull $recommendedModel 2>&1
+            if ($pullOutput) {
+                $pullOutput | ForEach-Object {
+                    if ($_ -and $_.ToString().Trim()) {
+                        Write-Log $_
+                    }
+                }
+            }
+            Write-Log "LLM model downloaded successfully"
+        } catch {
+            Write-Log "WARNING: Failed to download LLM model: $($_.Exception.Message)"
+            Write-Log "You can download it later using: ollama pull $recommendedModel"
+        }
 
         Write-Log "Step 4/5 Complete"
     }
@@ -165,28 +202,59 @@ try {
     # Build base dependencies
     Write-Log "Building base dependencies (this may take 5-10 minutes)..."
     Write-Log "Running: docker compose build base-poetry-deps"
-    docker compose build base-poetry-deps 2>&1 | ForEach-Object { Write-Log $_ }
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log "ERROR: Failed to build base dependencies"
-        Write-Log "Exit code: $LASTEXITCODE"
-        throw "Docker build failed for base-poetry-deps"
+    try {
+        $buildOutput = docker compose build base-poetry-deps 2>&1
+        $exitCode = $LASTEXITCODE
+
+        # Log all output
+        if ($buildOutput) {
+            $buildOutput | ForEach-Object {
+                if ($_ -and $_.ToString().Trim()) {
+                    Write-Log $_
+                }
+            }
+        }
+
+        if ($exitCode -ne 0) {
+            Write-Log "ERROR: Docker build failed with exit code: $exitCode"
+            throw "Docker build failed for base-poetry-deps with exit code $exitCode"
+        }
+
+        Write-Log "Base dependencies built successfully"
+    } catch {
+        Write-Log "ERROR: Exception during base-poetry-deps build: $($_.Exception.Message)"
+        throw
     }
-
-    Write-Log "Base dependencies built successfully"
 
     # Build application services
     Write-Log "Building application services (this may take 5-10 minutes)..."
     Write-Log "Running: docker compose build"
-    docker compose build 2>&1 | ForEach-Object { Write-Log $_ }
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log "ERROR: Failed to build application services"
-        Write-Log "Exit code: $LASTEXITCODE"
-        throw "Docker build failed for application services"
+    try {
+        $buildOutput = docker compose build 2>&1
+        $exitCode = $LASTEXITCODE
+
+        # Log all output
+        if ($buildOutput) {
+            $buildOutput | ForEach-Object {
+                if ($_ -and $_.ToString().Trim()) {
+                    Write-Log $_
+                }
+            }
+        }
+
+        if ($exitCode -ne 0) {
+            Write-Log "ERROR: Docker build failed with exit code: $exitCode"
+            throw "Docker build failed for application services with exit code $exitCode"
+        }
+
+        Write-Log "Application services built successfully"
+    } catch {
+        Write-Log "ERROR: Exception during application build: $($_.Exception.Message)"
+        throw
     }
 
-    Write-Log "Application services built successfully"
     Write-Log "Step 5/5 Complete"
 
     Write-Progress-Step "Installation Complete!"

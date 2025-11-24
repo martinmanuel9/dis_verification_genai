@@ -118,9 +118,53 @@ $startNow = Read-Host "Would you like to start the application now? (y/N)"
 if ($startNow -eq "y" -or $startNow -eq "Y") {
     Write-Info "Starting DIS Verification GenAI..."
     Set-Location $InstallDir
+
+    # Build Docker images first
+    Write-Info "Building Docker images (this may take several minutes on first run)..."
+    Write-Host ""
+    Write-Info "Step 1/3: Building base dependencies..."
+    docker compose build base-poetry-deps
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to build base dependencies"
+        Write-Warning "You can try building manually with: cd '$InstallDir' && docker compose build"
+        pause
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Info "Step 2/3: Building application services..."
+    docker compose build
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to build application services"
+        Write-Warning "You can try building manually with: cd '$InstallDir' && docker compose build"
+        pause
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Info "Step 3/3: Starting services..."
     docker compose up -d
-    Start-Sleep -Seconds 10
-    Write-Success "Application started!"
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to start services"
+        Write-Warning "Check Docker logs with: docker compose logs"
+        pause
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Info "Waiting for services to initialize..."
+    Start-Sleep -Seconds 15
+
+    Write-Success "Application started successfully!"
+    Write-Host ""
+    Write-Info "Services running:"
+    Write-Host "  - Streamlit UI:  http://localhost:8501"
+    Write-Host "  - FastAPI:       http://localhost:9020"
+    Write-Host "  - ChromaDB:      http://localhost:8000"
+    Write-Host ""
     Write-Info "Opening web interface..."
     Start-Process "http://localhost:8501"
 }

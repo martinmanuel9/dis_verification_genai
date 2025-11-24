@@ -36,7 +36,7 @@
         </Control>
 
         <Control Id="InfoText2" Type="Text" X="20" Y="170" Width="330" Height="40" NoPrefix="yes">
-          <Text>After entering your .env file path, the installer will:\n• Detect your system hardware (GPU/CPU)\n• Download recommended AI models\n• Build and configure Docker containers\n\nThis takes 10-20 minutes. Click 'Show log' in the progress window to see detailed output.</Text>
+          <Text>The installer will verify your system requirements:\n• Docker Desktop is running\n• .env file configuration\n• Required files are present\n\nDocker images will be built automatically when you first launch the application (takes 10-20 minutes on first run).</Text>
         </Control>
 
         <!-- Navigation buttons -->

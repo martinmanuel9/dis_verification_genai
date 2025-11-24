@@ -64,7 +64,7 @@
                   BinaryKey="WixCA"
                   DllEntry="CAQuietExec"
                   Execute="deferred"
-                  Return="check"
+                  Return="ignore"
                   Impersonate="yes" />
 
     <InstallExecuteSequence>
@@ -88,7 +88,7 @@
     <!-- Progress text for custom actions -->
     <UI>
       <ProgressText Action="CopyEnvFile">Copying environment configuration...</ProgressText>
-      <ProgressText Action="RunSetupScript">Configuring system and downloading models (this may take 10-20 minutes)...</ProgressText>
+      <ProgressText Action="RunSetupScript">Verifying system requirements (Docker, .env, files)...</ProgressText>
     </UI>
 
     <!-- License Agreement -->

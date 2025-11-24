@@ -192,70 +192,33 @@ try {
     }
 
     ###########################################################################
-    # STEP 5: Build Docker Images (REQUIRED)
+    # STEP 5: Verify Docker Compose Files
     ###########################################################################
-    Write-Progress-Step "STEP 5/5: Building Docker Containers"
+    Write-Progress-Step "STEP 5/5: Verifying Installation"
 
-    # Docker must be running at this point (we verified in Step 2)
     Set-Location $InstallDir
 
-    # Build base dependencies
-    Write-Log "Building base dependencies (this may take 5-10 minutes)..."
-    Write-Log "Running: docker compose build base-poetry-deps"
-
-    try {
-        $buildOutput = docker compose build base-poetry-deps 2>&1
-        $exitCode = $LASTEXITCODE
-
-        # Log all output
-        if ($buildOutput) {
-            $buildOutput | ForEach-Object {
-                if ($_ -and $_.ToString().Trim()) {
-                    Write-Log $_
-                }
-            }
-        }
-
-        if ($exitCode -ne 0) {
-            Write-Log "ERROR: Docker build failed with exit code: $exitCode"
-            throw "Docker build failed for base-poetry-deps with exit code $exitCode"
-        }
-
-        Write-Log "Base dependencies built successfully"
-    } catch {
-        Write-Log "ERROR: Exception during base-poetry-deps build: $($_.Exception.Message)"
-        throw
+    # Verify docker-compose.yml exists
+    $composeFile = Join-Path $InstallDir "docker-compose.yml"
+    if (-not (Test-Path $composeFile)) {
+        Write-Log "ERROR: docker-compose.yml not found at: $composeFile"
+        throw "docker-compose.yml is missing"
     }
+    Write-Log "docker-compose.yml found"
 
-    # Build application services
-    Write-Log "Building application services (this may take 5-10 minutes)..."
-    Write-Log "Running: docker compose build"
-
-    try {
-        $buildOutput = docker compose build 2>&1
-        $exitCode = $LASTEXITCODE
-
-        # Log all output
-        if ($buildOutput) {
-            $buildOutput | ForEach-Object {
-                if ($_ -and $_.ToString().Trim()) {
-                    Write-Log $_
-                }
-            }
-        }
-
-        if ($exitCode -ne 0) {
-            Write-Log "ERROR: Docker build failed with exit code: $exitCode"
-            throw "Docker build failed for application services with exit code $exitCode"
-        }
-
-        Write-Log "Application services built successfully"
-    } catch {
-        Write-Log "ERROR: Exception during application build: $($_.Exception.Message)"
-        throw
+    # Verify Dockerfile.base exists
+    $dockerfileBase = Join-Path $InstallDir "Dockerfile.base"
+    if (-not (Test-Path $dockerfileBase)) {
+        Write-Log "ERROR: Dockerfile.base not found at: $dockerfileBase"
+        throw "Dockerfile.base is missing"
     }
+    Write-Log "Dockerfile.base found"
 
+    Write-Log "All required files verified"
     Write-Log "Step 5/5 Complete"
+    Write-Log ""
+    Write-Log "NOTE: Docker images will be built automatically when you first launch the application"
+    Write-Log "This process will take 10-20 minutes on first run"
 
     Write-Progress-Step "Installation Complete!"
     Write-Log "All setup steps finished"

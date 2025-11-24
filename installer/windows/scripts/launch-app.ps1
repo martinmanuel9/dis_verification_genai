@@ -93,19 +93,42 @@ try {
 }
 
 if (-not $imagesExist) {
-    Write-ErrorMsg "Docker images not found!"
     Write-Host ""
-    Write-Info "It looks like this is your first time running the application."
-    Write-Info "Please run the 'First-Time Setup' shortcut from the Start Menu first."
+    Write-Info "First-time setup detected - Docker images not found"
+    Write-Info "Building Docker images (this will take 10-20 minutes)..."
     Write-Host ""
-    Write-Info "Or build manually with:"
-    Write-Host "  cd '$InstallDir'"
-    Write-Host "  docker compose build base-poetry-deps"
-    Write-Host "  docker compose build"
+
+    # Build base dependencies first
+    Write-Info "Step 1/2: Building base dependencies..."
+    docker compose build base-poetry-deps
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to build base dependencies"
+        Write-Info "Check Docker is running and try again"
+        Write-Host ""
+        Write-Host "Press any key to exit..."
+        $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit 1
+    }
+
+    Write-Success "Base dependencies built successfully"
     Write-Host ""
-    Write-Host "Press any key to exit..."
-    $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    exit 1
+
+    # Build application services
+    Write-Info "Step 2/2: Building application services..."
+    docker compose build
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to build application services"
+        Write-Info "Check Docker logs and try again"
+        Write-Host ""
+        Write-Host "Press any key to exit..."
+        $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit 1
+    }
+
+    Write-Success "Application services built successfully"
+    Write-Host ""
 }
 
 Write-Host ""

@@ -55,6 +55,6 @@
 
     <!-- Properties for the dialog -->
     <Property Id="ENV_CONFIG_OPTION" Value="LATER" />
-    <Property Id="ENV_FILE_CONTENT" Value="" />
+    <Property Id="ENV_FILE_CONTENT" />
   </Fragment>
 </Wix>

@@ -8,39 +8,19 @@
           <Text>{\WixUI_Font_Title}Environment Configuration</Text>
         </Control>
 
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="20" Transparent="yes" NoPrefix="yes">
-          <Text>You can paste your existing .env file contents below, or configure it later.</Text>
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="40" Transparent="yes" NoPrefix="yes">
+          <Text>Paste your .env file contents below. This file contains your API keys and configuration settings.</Text>
         </Control>
 
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
 
-        <!-- Option selection -->
-        <Control Id="ConfigureNowRadio" Type="RadioButtonGroup" X="20" Y="50" Width="330" Height="40" Property="ENV_CONFIG_OPTION">
-          <RadioButtonGroup Property="ENV_CONFIG_OPTION">
-            <RadioButton Text="Paste .env file contents now" Value="PASTE" X="0" Y="0" Width="300" Height="17" />
-            <RadioButton Text="Configure environment later (recommended for new users)" Value="LATER" X="0" Y="20" Width="300" Height="17" />
-          </RadioButtonGroup>
-        </Control>
-
         <!-- Multi-line text box for .env contents -->
-        <Control Id="EnvContentLabel" Type="Text" X="20" Y="95" Width="330" Height="10" NoPrefix="yes">
-          <Text>Paste your .env file contents here:</Text>
-          <Condition Action="show">ENV_CONFIG_OPTION = "PASTE"</Condition>
-          <Condition Action="hide">ENV_CONFIG_OPTION &lt;&gt; "PASTE"</Condition>
+        <Control Id="EnvContentLabel" Type="Text" X="20" Y="70" Width="330" Height="10" NoPrefix="yes">
+          <Text>Environment file contents (.env):</Text>
         </Control>
 
-        <Control Id="EnvContentEdit" Type="ScrollableText" X="20" Y="107" Width="330" Height="100" Property="ENV_FILE_CONTENT" Sunken="yes">
-          <Condition Action="show">ENV_CONFIG_OPTION = "PASTE"</Condition>
-          <Condition Action="hide">ENV_CONFIG_OPTION &lt;&gt; "PASTE"</Condition>
-        </Control>
-
-        <!-- Info text when "Later" is selected -->
-        <Control Id="LaterInfoText" Type="Text" X="20" Y="107" Width="330" Height="60" NoPrefix="yes">
-          <Text>You will be able to configure your environment using the interactive setup wizard after installation completes. This is recommended for first-time users.</Text>
-          <Condition Action="show">ENV_CONFIG_OPTION = "LATER"</Condition>
-          <Condition Action="hide">ENV_CONFIG_OPTION &lt;&gt; "LATER"</Condition>
-        </Control>
+        <Control Id="EnvContentEdit" Type="Edit" X="20" Y="85" Width="330" Height="130" Property="ENV_FILE_CONTENT" Multiline="yes" />
 
         <!-- Navigation buttons -->
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
@@ -54,7 +34,6 @@
     </UI>
 
     <!-- Properties for the dialog -->
-    <Property Id="ENV_CONFIG_OPTION" Value="LATER" />
     <Property Id="ENV_FILE_CONTENT" />
   </Fragment>
 </Wix>

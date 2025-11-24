@@ -228,8 +228,21 @@ jobs:
             exit 1
           }
 
+          # Compile CustomUI.wxs
+          & candle.exe CustomUI.wxs `
+            -dStagingDir="$stagingPath" `
+            -dVersion=$version `
+            -arch x64 `
+            -ext WixUIExtension `
+            -ext WixUtilExtension
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "candle.exe failed for CustomUI.wxs"
+            exit 1
+          }
+
           # Link to create MSI
-          & light.exe Product_build.wixobj FilesFragment.wixobj `
+          & light.exe Product_build.wixobj FilesFragment.wixobj CustomUI.wixobj `
             -out ../../dis-verification-genai-$version.msi `
             -ext WixUIExtension `
             -ext WixUtilExtension `

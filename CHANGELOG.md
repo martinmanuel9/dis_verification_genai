@@ -5,7 +5,7 @@ All notable changes to DIS Verification GenAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.24] - 2025-11-24
+## [1.0.25] - 2025-11-24
 
 ### Added
 - Initial release of Verification GenAI
@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated installation to automatically install the software
 - Fix on managing Agents and Agent Sets
 - Installer allows for env input
+- Attempts to fix the poetry toml and lock files
 
 ### Features
 - **Test Plan Generation**: Multi-agent Actor-Critic system for extracting requirements

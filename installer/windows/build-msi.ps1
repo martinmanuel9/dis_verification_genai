@@ -68,7 +68,9 @@ $requiredFiles = @(
     "VERSION",
     "CHANGELOG.md",
     "README.md",
-    "INSTALL.md"
+    "INSTALL.md",
+    "poetry.lock",
+    "pyproject.toml"
 )
 
 foreach ($file in $requiredFiles) {

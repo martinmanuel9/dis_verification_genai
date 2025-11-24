@@ -156,6 +156,8 @@ jobs:
           Copy-Item README.md $stagingDir
           Copy-Item INSTALL.md $stagingDir
           Copy-Item LICENSE.rtf $stagingDir
+          Copy-Item poetry.lock $stagingDir
+          Copy-Item pyproject.toml $stagingDir
 
           Write-Host "Staging directory created with all files"
           Get-ChildItem -Path $stagingDir -Recurse | Select-Object -First 20

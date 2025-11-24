@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automated Ollama model pulling script with GPU detection
 - Updated installation to automatically install the software
 - Fix on managing Agents and Agent Sets
+- Installer allows for env input
 
 ### Features
 - **Test Plan Generation**: Multi-agent Actor-Critic system for extracting requirements

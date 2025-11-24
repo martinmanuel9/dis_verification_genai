@@ -36,7 +36,7 @@
         </Control>
 
         <Control Id="InfoText2" Type="Text" X="20" Y="170" Width="330" Height="40" NoPrefix="yes">
-          <Text>The installer will verify your system requirements:\n• Docker Desktop is running\n• .env file configuration\n• Required files are present\n\nDocker images will be built automatically when you first launch the application (takes 10-20 minutes on first run).</Text>
+          <Text>The installer will:\n• Verify Docker Desktop is running\n• Detect your hardware (GPU/CPU)\n• Download recommended AI models\n• Build Docker containers\n• Start the application services\n\nThis takes 10-20 minutes. Click 'Show log' to see progress.</Text>
         </Control>
 
         <!-- Navigation buttons -->

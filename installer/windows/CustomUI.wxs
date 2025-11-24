@@ -1,34 +1,51 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
-    <!-- Custom UI sequence that adds the .env configuration dialog -->
+    <!-- Custom UI sequence with .env file browser -->
     <UI Id="CustomInstallDir">
       <!-- Reference the standard InstallDir dialog set -->
       <UIRef Id="WixUI_InstallDir" />
 
-      <!-- Custom Dialog for .env configuration -->
-      <Dialog Id="EnvConfigDlg" Width="370" Height="270" Title="[ProductName] - Environment Configuration">
+      <!-- Custom Dialog for .env file selection -->
+      <Dialog Id="EnvFileBrowseDlg" Width="370" Height="270" Title="[ProductName] - Environment Configuration">
         <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
           <Text>{\WixUI_Font_Title}Environment Configuration</Text>
         </Control>
 
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="40" Transparent="yes" NoPrefix="yes">
-          <Text>Paste your .env file contents below. This file contains your API keys and configuration settings.</Text>
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="30" Transparent="yes" NoPrefix="yes">
+          <Text>Select your .env configuration file. This file is REQUIRED and contains your API keys and settings.</Text>
         </Control>
 
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
 
-        <!-- Multi-line text box for .env contents -->
-        <Control Id="EnvContentLabel" Type="Text" X="20" Y="70" Width="330" Height="10" NoPrefix="yes">
-          <Text>Environment file contents (.env):</Text>
+        <!-- File path selection -->
+        <Control Id="EnvFileLabel" Type="Text" X="20" Y="60" Width="290" Height="10" NoPrefix="yes">
+          <Text>.env file location (REQUIRED):</Text>
         </Control>
 
-        <Control Id="EnvContentEdit" Type="Edit" X="20" Y="85" Width="330" Height="130" Property="ENV_FILE_CONTENT" Multiline="yes" />
+        <Control Id="EnvFileEdit" Type="Edit" X="20" Y="75" Width="260" Height="18" Property="ENV_FILE_PATH" />
+
+        <Control Id="BrowseButton" Type="PushButton" X="285" Y="75" Width="65" Height="18" Text="Browse...">
+          <Publish Event="SpawnDialog" Value="EnvFileBrowse">1</Publish>
+        </Control>
+
+        <!-- Info text -->
+        <Control Id="InfoText1" Type="Text" X="20" Y="105" Width="330" Height="50" NoPrefix="yes">
+          <Text>Your .env file must contain:\n• OPENAI_API_KEY or other LLM provider keys\n• Database credentials (DB_PASSWORD, DATABASE_URL)\n• Service configuration (OLLAMA_URL, CHROMA_URL, etc.)\n\nWithout this file, the application cannot function.</Text>
+        </Control>
+
+        <Control Id="InfoText2" Type="Text" X="20" Y="160" Width="330" Height="50" NoPrefix="yes">
+          <Text>After selecting your .env file, the installer will automatically:\n• Detect your system hardware (GPU/CPU)\n• Download recommended AI models\n• Build and configure Docker containers\n\nThis process takes 10-20 minutes with progress shown in the installer.</Text>
+        </Control>
 
         <!-- Navigation buttons -->
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <!-- Disable Next button if ENV_FILE_PATH is empty -->
+          <Condition Action="disable"><![CDATA[ENV_FILE_PATH = ""]]></Condition>
+          <Condition Action="enable"><![CDATA[ENV_FILE_PATH <> ""]]></Condition>
+        </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
           <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
         </Control>
@@ -37,15 +54,38 @@
       </Dialog>
 
       <!-- Customize the dialog sequence to insert our custom dialog -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="EnvConfigDlg" Order="3">LicenseAccepted = "1"</Publish>
-      <Publish Dialog="EnvConfigDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
-      <Publish Dialog="EnvConfigDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg">1</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="EnvFileBrowseDlg" Order="3">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="EnvFileBrowseDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="EnvFileBrowseDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg">1</Publish>
 
       <!-- Update InstallDirDlg back button to go to our custom dialog -->
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="EnvConfigDlg">1</Publish>
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="EnvFileBrowseDlg">1</Publish>
     </UI>
 
     <!-- Properties for the dialog -->
-    <Property Id="ENV_FILE_CONTENT" />
+    <Property Id="ENV_FILE_PATH" />
+
+    <!-- Browse dialog for selecting .env file -->
+    <UI Id="EnvFileBrowse">
+      <Dialog Id="EnvFileBrowse" Width="370" Height="270" Title="[ProductName] - Browse for .env File">
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
+          <Text>{\WixUI_Font_Title}Select .env File</Text>
+        </Control>
+
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+
+        <Control Id="PathEdit" Type="PathEdit" X="25" Y="60" Width="320" Height="18" Property="ENV_FILE_PATH" />
+
+        <Control Id="OK" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="OK">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit">1</Publish>
+        </Control>
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+      </Dialog>
+    </UI>
   </Fragment>
 </Wix>

@@ -41,47 +41,40 @@
       <ComponentGroupRef Id="ShortcutComponents" />
     </Feature>
 
-    <!-- Property to control whether to launch setup -->
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch interactive configuration wizard (recommended for first-time users)" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
-
-    <!-- Property for WixShellExec - will be set by custom action -->
-    <Property Id="WixShellExecTarget" Value="[#run_post_install.cmd]" />
-
-    <!-- Set the actual command with resolved paths -->
-    <CustomAction Id="SetLaunchCommand"
-                  Property="WixShellExecTarget"
-                  Value="&quot;[INSTALLFOLDER]scripts\run-post-install.cmd&quot; &quot;[INSTALLFOLDER]&quot;"
-                  Execute="immediate" />
-
-    <!-- Custom action to launch setup wizard -->
-    <CustomAction Id="LaunchSetupWizard"
-                  BinaryKey="WixCA"
-                  DllEntry="WixShellExec"
-                  Execute="immediate"
-                  Return="ignore"
-                  Impersonate="yes" />
-
-    <!-- Custom action to create .env file from user input -->
-    <!-- Use dedicated PowerShell script with visible window for debugging -->
-    <SetProperty Id="CreateEnvFile"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\create-env.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvContent &quot;[ENV_FILE_CONTENT]&quot;"
+    <!-- Custom action to copy .env file during installation -->
+    <SetProperty Id="CopyEnvFile"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -Command &quot;if (-not (Test-Path '[ENV_FILE_PATH]')) { Write-Host 'ERROR: .env file not found at [ENV_FILE_PATH]'; exit 1 }; Copy-Item '[ENV_FILE_PATH]' '[INSTALLFOLDER].env' -Force; Write-Host 'Copied .env file successfully'; exit 0&quot;"
                  Sequence="execute"
-                 Before="CreateEnvFile" />
-    <CustomAction Id="CreateEnvFile"
+                 Before="CopyEnvFile" />
+    <CustomAction Id="CopyEnvFile"
                   BinaryKey="WixCA"
                   DllEntry="WixQuietExec"
-                  Execute="immediate"
+                  Execute="deferred"
+                  Return="check"
+                  Impersonate="no" />
+
+    <!-- Custom action to run setup script during installation with progress -->
+    <SetProperty Id="RunSetupScript"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\setup-during-install.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvFilePath &quot;[ENV_FILE_PATH]&quot;"
+                 Sequence="execute"
+                 Before="RunSetupScript" />
+    <CustomAction Id="RunSetupScript"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
                   Return="ignore"
                   Impersonate="yes" />
 
-    <InstallExecuteSequence>
-      <!-- Create .env file during installation -->
-      <Custom Action="CreateEnvFile" After="InstallFiles">NOT Installed AND ENV_FILE_CONTENT</Custom>
+    <!-- Progress text for custom actions -->
+    <ProgressText Action="CopyEnvFile">Copying environment configuration...</ProgressText>
+    <ProgressText Action="RunSetupScript">Configuring system and downloading models (this may take 10-20 minutes)...</ProgressText>
 
-      <!-- Launch setup wizard after installation -->
-      <Custom Action="SetLaunchCommand" Before="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
-      <Custom Action="LaunchSetupWizard" After="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
+    <InstallExecuteSequence>
+      <!-- Copy .env file (REQUIRED) -->
+      <Custom Action="CopyEnvFile" After="InstallFiles">NOT Installed AND ENV_FILE_PATH</Custom>
+
+      <!-- Run setup script after files are installed (only if .env was copied successfully) -->
+      <Custom Action="RunSetupScript" After="CopyEnvFile">NOT Installed AND ENV_FILE_PATH</Custom>
     </InstallExecuteSequence>
 
     <!-- UI -->

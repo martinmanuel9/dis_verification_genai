@@ -49,19 +49,20 @@
 
     <CustomAction Id="CopyEnvFile"
                   BinaryKey="WixCA"
-                  DllEntry="WixQuietExec"
+                  DllEntry="CAQuietExec"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
 
     <!-- Custom action to run setup script during installation with progress -->
-    <SetProperty Id="RunSetupScript"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\setup-during-install.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvFilePath &quot;[ENV_FILE_PATH]&quot;"
-                 Sequence="execute"
-                 Before="RunSetupScript" />
+    <CustomAction Id="SetRunSetupScriptCommand"
+                  Property="RunSetupScript"
+                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\setup-during-install.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot; -EnvFilePath &quot;[ENV_FILE_PATH]&quot;"
+                  Execute="immediate" />
+
     <CustomAction Id="RunSetupScript"
                   BinaryKey="WixCA"
-                  DllEntry="WixQuietExec"
+                  DllEntry="CAQuietExec"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="yes" />
@@ -73,8 +74,11 @@
       <!-- Copy .env file (REQUIRED) -->
       <Custom Action="CopyEnvFile" After="InstallFiles">NOT Installed AND ENV_FILE_PATH</Custom>
 
+      <!-- Set command for running setup script -->
+      <Custom Action="SetRunSetupScriptCommand" After="CopyEnvFile">NOT Installed AND ENV_FILE_PATH</Custom>
+
       <!-- Run setup script after files are installed (only if .env was copied successfully) -->
-      <Custom Action="RunSetupScript" After="CopyEnvFile">NOT Installed AND ENV_FILE_PATH</Custom>
+      <Custom Action="RunSetupScript" After="SetRunSetupScriptCommand">NOT Installed AND ENV_FILE_PATH</Custom>
     </InstallExecuteSequence>
 
     <!-- UI -->

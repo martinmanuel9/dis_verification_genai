@@ -36,7 +36,7 @@
         </Control>
 
         <Control Id="InfoText2" Type="Text" X="20" Y="170" Width="330" Height="40" NoPrefix="yes">
-          <Text>After entering your .env file path, the installer will:\n• Detect your system hardware (GPU/CPU)\n• Download recommended AI models\n• Build and configure Docker containers\n\nThis takes 10-20 minutes with progress shown.</Text>
+          <Text>After entering your .env file path, the installer will:\n• Detect your system hardware (GPU/CPU)\n• Download recommended AI models\n• Build and configure Docker containers\n\nThis takes 10-20 minutes. Click 'Show log' in the progress window to see detailed output.</Text>
         </Control>
 
         <!-- Navigation buttons -->

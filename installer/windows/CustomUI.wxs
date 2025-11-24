@@ -20,23 +20,23 @@
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
 
         <!-- File path selection -->
-        <Control Id="EnvFileLabel" Type="Text" X="20" Y="60" Width="290" Height="10" NoPrefix="yes">
-          <Text>.env file location (REQUIRED):</Text>
+        <Control Id="EnvFileLabel" Type="Text" X="20" Y="60" Width="330" Height="10" NoPrefix="yes">
+          <Text>.env file path (REQUIRED - type or paste full path):</Text>
         </Control>
 
-        <Control Id="EnvFileEdit" Type="Edit" X="20" Y="75" Width="260" Height="18" Property="ENV_FILE_PATH" />
+        <Control Id="EnvFileEdit" Type="Edit" X="20" Y="75" Width="330" Height="18" Property="ENV_FILE_PATH" />
 
-        <Control Id="BrowseButton" Type="PushButton" X="285" Y="75" Width="65" Height="18" Text="Browse...">
-          <Publish Event="SpawnDialog" Value="EnvFileBrowse">1</Publish>
+        <Control Id="HintText" Type="Text" X="20" Y="95" Width="330" Height="10" NoPrefix="yes">
+          <Text>Example: C:\Users\YourName\Documents\.env</Text>
         </Control>
 
         <!-- Info text -->
-        <Control Id="InfoText1" Type="Text" X="20" Y="105" Width="330" Height="50" NoPrefix="yes">
+        <Control Id="InfoText1" Type="Text" X="20" Y="115" Width="330" Height="50" NoPrefix="yes">
           <Text>Your .env file must contain:\n• OPENAI_API_KEY or other LLM provider keys\n• Database credentials (DB_PASSWORD, DATABASE_URL)\n• Service configuration (OLLAMA_URL, CHROMA_URL, etc.)\n\nWithout this file, the application cannot function.</Text>
         </Control>
 
-        <Control Id="InfoText2" Type="Text" X="20" Y="160" Width="330" Height="50" NoPrefix="yes">
-          <Text>After selecting your .env file, the installer will automatically:\n• Detect your system hardware (GPU/CPU)\n• Download recommended AI models\n• Build and configure Docker containers\n\nThis process takes 10-20 minutes with progress shown in the installer.</Text>
+        <Control Id="InfoText2" Type="Text" X="20" Y="170" Width="330" Height="40" NoPrefix="yes">
+          <Text>After entering your .env file path, the installer will:\n• Detect your system hardware (GPU/CPU)\n• Download recommended AI models\n• Build and configure Docker containers\n\nThis takes 10-20 minutes with progress shown.</Text>
         </Control>
 
         <!-- Navigation buttons -->
@@ -65,27 +65,5 @@
     <!-- Properties for the dialog -->
     <Property Id="ENV_FILE_PATH" />
 
-    <!-- Browse dialog for selecting .env file -->
-    <UI Id="EnvFileBrowse">
-      <Dialog Id="EnvFileBrowse" Width="370" Height="270" Title="[ProductName] - Browse for .env File">
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
-          <Text>{\WixUI_Font_Title}Select .env File</Text>
-        </Control>
-
-        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
-        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-
-        <Control Id="PathEdit" Type="PathEdit" X="25" Y="60" Width="320" Height="18" Property="ENV_FILE_PATH" />
-
-        <Control Id="OK" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="OK">
-          <Publish Event="EndDialog" Value="Return">1</Publish>
-        </Control>
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
-          <Publish Event="EndDialog" Value="Exit">1</Publish>
-        </Control>
-
-        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-      </Dialog>
-    </UI>
   </Fragment>
 </Wix>

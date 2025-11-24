@@ -97,23 +97,8 @@ if (-not (Test-Path $licenseFile)) {
 }
 Copy-Item $licenseFile $buildDir
 
-# Convert PNG to ICO and copy icon file
-$iconPng = "$PSScriptRoot\app-icon.png"
+# Copy icon file (optional)
 $iconFile = "$PSScriptRoot\app-icon.ico"
-$convertScript = "$PSScriptRoot\convert-icon.py"
-
-if (-not (Test-Path $iconFile) -and (Test-Path $iconPng) -and (Test-Path $convertScript)) {
-    Write-Info "Converting PNG to ICO format..."
-    try {
-        python $convertScript
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Icon converted successfully"
-        }
-    } catch {
-        Write-Warning "Could not convert icon: $($_.Exception.Message)"
-    }
-}
-
 if (Test-Path $iconFile) {
     Copy-Item $iconFile $buildDir
     Write-Info "Icon file copied to build directory"

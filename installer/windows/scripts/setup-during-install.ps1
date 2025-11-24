@@ -52,7 +52,7 @@ try {
     Write-Log "Step 1/5 Complete"
 
     ###########################################################################
-    # STEP 2: Check Docker
+    # STEP 2: Check Docker (REQUIRED)
     ###########################################################################
     Write-Progress-Step "STEP 2/5: Docker Verification"
 
@@ -68,12 +68,16 @@ try {
     }
 
     if (-not $dockerRunning) {
-        Write-Log "WARNING: Docker is not running"
-        Write-Log "You'll need to start Docker and run 'First-Time Setup' after installation"
-        Write-Log "Step 2/5 Skipped (Docker not available)"
-    } else {
-        Write-Log "Step 2/5 Complete"
+        Write-Log "ERROR: Docker Desktop is not running!"
+        Write-Log "Docker is REQUIRED for installation to complete"
+        Write-Log "Please:"
+        Write-Log "1. Start Docker Desktop"
+        Write-Log "2. Wait for it to fully start"
+        Write-Log "3. Run the installer again"
+        throw "Docker is not running - cannot continue installation"
     }
+
+    Write-Log "Step 2/5 Complete"
 
     ###########################################################################
     # STEP 3: Detect System
@@ -151,42 +155,39 @@ try {
     }
 
     ###########################################################################
-    # STEP 5: Build Docker Images
+    # STEP 5: Build Docker Images (REQUIRED)
     ###########################################################################
     Write-Progress-Step "STEP 5/5: Building Docker Containers"
 
-    if (-not $dockerRunning) {
-        Write-Log "Docker not running - skipping build"
-        Write-Log "Run 'First-Time Setup' from Start Menu after starting Docker"
-        Write-Log "Step 5/5 Skipped (Docker not available)"
-    } else {
-        Set-Location $InstallDir
+    # Docker must be running at this point (we verified in Step 2)
+    Set-Location $InstallDir
 
-        # Build base dependencies
-        Write-Log "Building base dependencies (this may take 5-10 minutes)..."
-        Write-Log "Running: docker compose build base-poetry-deps"
-        docker compose build base-poetry-deps 2>&1 | ForEach-Object { Write-Log $_ }
+    # Build base dependencies
+    Write-Log "Building base dependencies (this may take 5-10 minutes)..."
+    Write-Log "Running: docker compose build base-poetry-deps"
+    docker compose build base-poetry-deps 2>&1 | ForEach-Object { Write-Log $_ }
 
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "ERROR: Failed to build base dependencies"
-            Write-Log "You can retry by running 'First-Time Setup' from Start Menu"
-        } else {
-            Write-Log "Base dependencies built successfully"
-
-            # Build application services
-            Write-Log "Building application services (this may take 5-10 minutes)..."
-            Write-Log "Running: docker compose build"
-            docker compose build 2>&1 | ForEach-Object { Write-Log $_ }
-
-            if ($LASTEXITCODE -ne 0) {
-                Write-Log "ERROR: Failed to build application services"
-                Write-Log "You can retry by running 'First-Time Setup' from Start Menu"
-            } else {
-                Write-Log "Application services built successfully"
-                Write-Log "Step 5/5 Complete"
-            }
-        }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log "ERROR: Failed to build base dependencies"
+        Write-Log "Exit code: $LASTEXITCODE"
+        throw "Docker build failed for base-poetry-deps"
     }
+
+    Write-Log "Base dependencies built successfully"
+
+    # Build application services
+    Write-Log "Building application services (this may take 5-10 minutes)..."
+    Write-Log "Running: docker compose build"
+    docker compose build 2>&1 | ForEach-Object { Write-Log $_ }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log "ERROR: Failed to build application services"
+        Write-Log "Exit code: $LASTEXITCODE"
+        throw "Docker build failed for application services"
+    }
+
+    Write-Log "Application services built successfully"
+    Write-Log "Step 5/5 Complete"
 
     Write-Progress-Step "Installation Complete!"
     Write-Log "All setup steps finished"

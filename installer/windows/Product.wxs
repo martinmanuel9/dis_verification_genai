@@ -51,7 +51,7 @@
                   BinaryKey="WixCA"
                   DllEntry="CAQuietExec"
                   Execute="deferred"
-                  Return="ignore"
+                  Return="check"
                   Impersonate="no" />
 
     <!-- Custom action to run setup script during installation with progress -->
@@ -64,7 +64,7 @@
                   BinaryKey="WixCA"
                   DllEntry="CAQuietExec"
                   Execute="deferred"
-                  Return="ignore"
+                  Return="check"
                   Impersonate="yes" />
 
     <InstallExecuteSequence>

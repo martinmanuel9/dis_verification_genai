@@ -6,20 +6,7 @@
       <!-- Reference the standard InstallDir dialog set -->
       <UIRef Id="WixUI_InstallDir" />
 
-      <!-- Add our custom environment configuration dialog -->
-      <DialogRef Id="EnvConfigDlg" />
-
-      <!-- Customize the dialog sequence to insert our custom dialog -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="EnvConfigDlg" Order="3">LicenseAccepted = "1"</Publish>
-      <Publish Dialog="EnvConfigDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
-      <Publish Dialog="EnvConfigDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg">1</Publish>
-
-      <!-- Update InstallDirDlg back button to go to our custom dialog -->
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="EnvConfigDlg">1</Publish>
-    </UI>
-
-    <!-- Custom Dialog for .env configuration -->
-    <UI>
+      <!-- Custom Dialog for .env configuration -->
       <Dialog Id="EnvConfigDlg" Width="370" Height="270" Title="[ProductName] - Environment Configuration">
         <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
           <Text>{\WixUI_Font_Title}Environment Configuration</Text>
@@ -68,6 +55,14 @@
 
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
       </Dialog>
+
+      <!-- Customize the dialog sequence to insert our custom dialog -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="EnvConfigDlg" Order="3">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="EnvConfigDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="EnvConfigDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg">1</Publish>
+
+      <!-- Update InstallDirDlg back button to go to our custom dialog -->
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="EnvConfigDlg">1</Publish>
     </UI>
 
     <!-- Properties for the dialog -->

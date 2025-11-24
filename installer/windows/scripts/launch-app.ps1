@@ -80,49 +80,36 @@ Write-Success ".env file found"
 Write-Info "Current directory: $InstallDir"
 
 # Check if images exist
+Write-Info "Checking for Docker images..."
 $imagesExist = $false
 try {
     $images = docker images --format "{{.Repository}}" | Select-String -Pattern "base-poetry-deps|fastapi|streamlit"
     if ($images) {
         $imagesExist = $true
+        Write-Success "Docker images found"
     }
 } catch {
     $imagesExist = $false
 }
 
 if (-not $imagesExist) {
-    Write-Info "First-time setup detected. Building Docker images..."
+    Write-ErrorMsg "Docker images not found!"
     Write-Host ""
-    Write-Info "Step 1/3: Building base dependencies (this may take 5-10 minutes)..."
-    docker compose build base-poetry-deps
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrorMsg "Failed to build base dependencies"
-        Write-Host ""
-        Write-Host "Press any key to exit..."
-        $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-        exit 1
-    }
-
+    Write-Info "It looks like this is your first time running the application."
+    Write-Info "Please run the 'First-Time Setup' shortcut from the Start Menu first."
     Write-Host ""
-    Write-Info "Step 2/3: Building application services..."
-    docker compose build
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrorMsg "Failed to build application services"
-        Write-Host ""
-        Write-Host "Press any key to exit..."
-        $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-        exit 1
-    }
-
-    Write-Success "Images built successfully!"
-} else {
-    Write-Info "Docker images already exist. Starting services..."
+    Write-Info "Or build manually with:"
+    Write-Host "  cd '$InstallDir'"
+    Write-Host "  docker compose build base-poetry-deps"
+    Write-Host "  docker compose build"
+    Write-Host ""
+    Write-Host "Press any key to exit..."
+    $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 1
 }
 
 Write-Host ""
-Write-Info "Step 3/3: Starting services..."
+Write-Info "Starting services..."
 docker compose up -d
 
 if ($LASTEXITCODE -ne 0) {

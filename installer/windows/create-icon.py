@@ -43,8 +43,8 @@ def create_icon_with_emoji(output_path="app-icon.ico"):
 
         # Try to draw robot emoji
         try:
-            # Calculate font size (roughly 60% of image size)
-            font_size = int(size * 0.6)
+            # Calculate font size (roughly 75% of image size for better visibility)
+            font_size = int(size * 0.75)
 
             # Try different fonts that might support emoji
             font_names = [

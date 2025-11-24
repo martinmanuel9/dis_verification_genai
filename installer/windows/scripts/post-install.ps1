@@ -81,17 +81,57 @@ if (-not $ollamaInstalled) {
     }
 } else {
     Write-Success "Ollama is already installed."
-    $pullModels = Read-Host "Pull/update Ollama models now? (y/N)"
-    if ($pullModels -eq "y" -or $pullModels -eq "Y") {
-        Write-Info "Pulling models (this may take several minutes)..."
-        # Check if we have WSL/bash for the script
-        if (Get-Command bash -ErrorAction SilentlyContinue) {
-            bash "$InstallDir\scripts\pull-ollama-models.sh" auto
+
+    # Detect GPU
+    Write-Info "Detecting system capabilities..."
+    $hasNvidiaGPU = $false
+    $hasAMDGPU = $false
+    $totalRAM = 0
+
+    try {
+        $gpu = Get-WmiObject Win32_VideoController | Select-Object -First 1
+        if ($gpu.Name -like "*NVIDIA*") {
+            $hasNvidiaGPU = $true
+            Write-Info "NVIDIA GPU detected: $($gpu.Name)"
+        } elseif ($gpu.Name -like "*AMD*" -or $gpu.Name -like "*Radeon*") {
+            $hasAMDGPU = $true
+            Write-Info "AMD GPU detected: $($gpu.Name)"
         } else {
-            Write-Info "Pulling recommended model: llama3.1:8b"
-            ollama pull llama3.1:8b
-            ollama pull snowflake-arctic-embed2
+            Write-Info "No dedicated GPU detected (CPU only)"
         }
+
+        $ram = Get-WmiObject Win32_ComputerSystem
+        $totalRAM = [math]::Round($ram.TotalPhysicalMemory / 1GB)
+        Write-Info "System RAM: ${totalRAM}GB"
+    } catch {
+        Write-Warning "Could not detect system specs"
+    }
+
+    $pullModels = Read-Host "Pull/update Ollama models now? (Y/n)"
+    if ($pullModels -ne "n" -and $pullModels -ne "N") {
+        Write-Info "Pulling recommended models for your system..."
+        Write-Host ""
+
+        # Always pull embedding model (small)
+        Write-Info "Pulling embedding model: snowflake-arctic-embed2"
+        ollama pull snowflake-arctic-embed2
+
+        # Choose LLM based on hardware
+        if ($hasNvidiaGPU -or $hasAMDGPU) {
+            if ($totalRAM -ge 16) {
+                Write-Info "Pulling large model (good GPU + RAM): llama3.1:8b"
+                ollama pull llama3.1:8b
+            } else {
+                Write-Info "Pulling medium model (good GPU, limited RAM): llama3.2:3b"
+                ollama pull llama3.2:3b
+            }
+        } else {
+            # CPU only - use smaller models
+            Write-Info "Pulling small model (CPU only): llama3.2:1b"
+            ollama pull llama3.2:1b
+        }
+
+        Write-Success "Ollama models pulled successfully!"
     }
 }
 
@@ -113,9 +153,9 @@ Write-Host "Troubleshooting: $InstallDir\INSTALL.md"
 Write-Host "═══════════════════════════════════════════════════════════════"
 Write-Host ""
 
-# Ask if user wants to start now
-$startNow = Read-Host "Would you like to start the application now? (y/N)"
-if ($startNow -eq "y" -or $startNow -eq "Y") {
+# Ask if user wants to build and start now
+$startNow = Read-Host "Would you like to build and start the application now? This will take 5-10 minutes. (Y/n)"
+if ($startNow -ne "n" -and $startNow -ne "N") {
     Write-Info "Starting DIS Verification GenAI..."
     Set-Location $InstallDir
 

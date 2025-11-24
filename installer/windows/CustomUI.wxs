@@ -63,7 +63,7 @@
     </UI>
 
     <!-- Properties for the dialog -->
-    <Property Id="ENV_FILE_PATH" />
+    <Property Id="ENV_FILE_PATH" Value="" Secure="yes" />
 
   </Fragment>
 </Wix>
